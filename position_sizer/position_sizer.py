@@ -1,8 +1,8 @@
 # position_sizer.py
 
 import logging
-from moneyverse.config import CONFIG
-from moneyverse.risk_manager import manage_risk
+from config import CONFIG
+from risk_manager import manage_risk
 import pandas as pd
 import ccxt
 

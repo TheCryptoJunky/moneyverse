@@ -2,7 +2,7 @@
 
 import asyncio
 from typing import List
-from mev_strategy import MEVStrategy
+from ..strategies.mev_strategy import MEVStrategy
 
 class WalletSwarm:
     def __init__(self, mev_strategy: MEVStrategy, wallet_addresses: List[str]):

@@ -1,8 +1,10 @@
 # moneyverse/risk_manager/risk_manager.py (updated)
 
 import logging
-from moneyverse.config import Config
-from moneyverse.trade_executor import TradeExecutor
+from config import Config
+from strategies.mev_strategy import MEVStrategy
+from trade_executor import TradeExecutor
+from wallet.wallet_swarm import WalletSwarm
 
 class RiskManager:
     def __init__(self, trade_executor: TradeExecutor, config: Config):

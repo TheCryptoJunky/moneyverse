@@ -2,8 +2,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 
-from mev_strategy import MEVStrategy
+from   strategies.mev_strategy import MEVStrategy
 
 class RLAgent:
     def __init__(self, strategy, device):
