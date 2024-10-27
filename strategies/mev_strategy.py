@@ -2,7 +2,7 @@
 
 import logging
 
-from config import MEV_STRATEGY, MEV_THRESHOLD
+from config.config import MEV_STRATEGY, MEV_THRESHOLD
 
 logger = logging.getLogger(__name__)
 

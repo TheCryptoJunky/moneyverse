@@ -1,7 +1,7 @@
 # moneyverse/wallet_swarm.py
 import logging
 
-from config import WALLET_SWARM_SIZE
+from config.config import WALLET_SWARM_SIZE
 
 logger = logging.getLogger(__name__)
 
