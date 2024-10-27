@@ -9,15 +9,21 @@ class MEVStrategy:
         self.strategy = MEV_STRATEGY
         self.threshold = MEV_THRESHOLD
 
-    def simple_strategy(self, data):
-        # Implement simple MEV strategy logic here
-        pass
+def simple_strategy(self, data):
+    # Example simple MEV strategy: if the current price is above the threshold, buy
+    if data['current_price'] > self.threshold:
+        return 'buy'
+    else:
+        return 'sell'
 
-    def advanced_strategy(self, data):
-        # Implement advanced MEV strategy logic here
-        pass
+def advanced_strategy(self, data):
+    # Example advanced MEV strategy: if the current price is above the threshold and the trend is upward, buy
+    if data['current_price'] > self.threshold and data['trend'] == 'upward':
+        return 'buy'
+    else:
+        return 'sell'
 
-    def execute_strategy(self, data):
+def execute_strategy(self, data):
         if self.strategy == "simple":
             return self.simple_strategy(data)
         elif self.strategy == "advanced":
