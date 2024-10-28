@@ -2,13 +2,22 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Wallet Swarm Control</title>
+    <title>Wallet Swarm Dashboard</title>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <h1>Wallet Swarm Dashboard</h1>
 
-    <h2>Total NAV: <span id="total-nav"></span></h2>
+    <!-- NAV Line Chart -->
+    <h3>Total Net Asset Value (NAV) Over Time</h3>
+    <canvas id="navChart" width="600" height="400"></canvas>
+
+    <!-- Wallet Balances Pie Chart -->
+    <h3>Wallet Balances</h3>
+    <canvas id="balanceChart" width="600" height="400"></canvas>
+
+    <!-- Strategy Control -->
     <h3>Strategy Control</h3>
     <form id="strategy-form">
         <label for="strategy">Select Strategy:</label>
@@ -22,38 +31,95 @@
         <button type="button" onclick="stopStrategy()">Stop Strategy</button>
     </form>
 
+    <!-- Wallet Details Table -->
     <h3>Wallets</h3>
     <div id="wallets"></div>
 
     <script>
-        function fetchSwarmStatus() {
-            $.getJSON("/swarm_status", function(data) {
-                $('#total-nav').text(data.total_nav);
-                $('#wallets').empty();
-                data.wallets.forEach(wallet => {
-                    $('#wallets').append(`<p>Address: ${wallet.address} - Balance: ${wallet.balance}</p>`);
-                });
+        // Function to initialize charts
+        let navChart, balanceChart;
+
+        function initCharts() {
+            const navCtx = document.getElementById('navChart').getContext('2d');
+            navChart = new Chart(navCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'NAV',
+                        data: [],
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 2,
+                        fill: false
+                    }]
+                },
+                options: {
+                    scales: { x: { type: 'time', time: { unit: 'minute' } } },
+                    responsive: true
+                }
+            });
+
+            const balanceCtx = document.getElementById('balanceChart').getContext('2d');
+            balanceChart = new Chart(balanceCtx, {
+                type: 'pie',
+                data: { labels: [], datasets: [{ data: [], backgroundColor: [] }] },
+                options: { responsive: true }
             });
         }
 
+        // Fetch NAV history and update NAV chart
+        function updateNavChart() {
+            $.getJSON('/nav_history', function(data) {
+                navChart.data.labels = data.map(item => new Date(item[0] * 1000));
+                navChart.data.datasets[0].data = data.map(item => item[1]);
+                navChart.update();
+            });
+        }
+
+        // Fetch swarm status and update wallet balance chart
+        function updateSwarmStatus() {
+            $.getJSON("/swarm_status", function(data) {
+                $('#total-nav').text(data.total_nav);
+
+                // Update wallet balance pie chart
+                const walletLabels = data.wallets.map(wallet => wallet.address);
+                const walletBalances = data.wallets.map(wallet => wallet.balance);
+                const colors = walletBalances.map(() => `hsl(${Math.random() * 360}, 70%, 70%)`);
+
+                balanceChart.data.labels = walletLabels;
+                balanceChart.data.datasets[0].data = walletBalances;
+                balanceChart.data.datasets[0].backgroundColor = colors;
+                balanceChart.update();
+
+                // Update wallets table
+                $('#wallets').html(data.wallets.map(wallet => `
+                    <p>Address: ${wallet.address} - Balance: ${wallet.balance}</p>
+                `).join(''));
+            });
+        }
+
+        // Start and Stop Strategy
         function startStrategy() {
             const strategy = $('#strategy').val();
             $.post("/start_strategy", { strategy: strategy }, function(response) {
                 alert(response.status);
-                fetchSwarmStatus();
+                updateSwarmStatus();
             });
         }
 
         function stopStrategy() {
             $.post("/stop_strategy", function(response) {
                 alert(response.status);
-                fetchSwarmStatus();
+                updateSwarmStatus();
             });
         }
 
         $(document).ready(function() {
-            fetchSwarmStatus();
-            setInterval(fetchSwarmStatus, 5000);  // Refresh every 5 seconds
+            initCharts();
+            updateSwarmStatus();
+            updateNavChart();
+            setInterval(updateSwarmStatus, 5000);
+            setInterval(updateNavChart, 60000);  // Fetch historical data every minute
         });
     </script>
 </body>

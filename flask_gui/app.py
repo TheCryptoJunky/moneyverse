@@ -1,11 +1,12 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from wallet.wallet_swarm import WalletSwarm
 from strategies.mev_strategy import MEV_STRATEGIES
+import time
 
 app = Flask(__name__)
 
-# Initialize wallet swarm and placeholder strategy
 wallet_swarm = WalletSwarm(mev_strategy=None, wallet_addresses=["0xWalletAddress1", "0xWalletAddress2"])
+historical_nav = []
 
 @app.route('/')
 def index():
@@ -27,10 +28,16 @@ def stop_strategy():
 
 @app.route('/swarm_status')
 def swarm_status():
+    nav = wallet_swarm.calculate_total_net_value()
+    historical_nav.append((time.time(), nav))
     return jsonify({
-        "total_nav": wallet_swarm.calculate_total_net_value(),
+        "total_nav": nav,
         "wallets": [{"address": w.address, "balance": w.balance} for w in wallet_swarm.wallets]
     })
+
+@app.route('/nav_history')
+def nav_history():
+    return jsonify(historical_nav)
 
 if __name__ == "__main__":
     app.run(debug=True)
