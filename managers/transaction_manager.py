@@ -1,92 +1,53 @@
 # Full file path: /moneyverse/managers/transaction_manager.py
 
-import asyncio
-import mysql.connector
+import requests
+from utils.retry_decorator import retry
 from centralized_logger import CentralizedLogger
-from src.utils.error_handler import handle_errors
-from src.database.database_manager import DatabaseManager
 
 logger = CentralizedLogger()
-db_manager = DatabaseManager()
 
 class TransactionManager:
     """
-    Manages the lifecycle of trading agents (bots) by initializing, tracking, and stopping them.
-    Each agent operates based on a specified strategy and updates its state in the database.
+    Manages transactions, including retry logic for resilience.
     """
 
     def __init__(self):
-        self.agents = []
+        self.transactions = []
 
-    async def initialize_agents(self, strategies):
+    @retry(retries=5, delay=2, backoff=1.5)
+    def fetch_data_from_api(self, api_url):
         """
-        Asynchronously initialize multiple agents based on the provided strategies.
-        Logs each initialization and stores lifecycle events in the database.
-        """
-        try:
-            logger.log("info", "Initializing agents...")
-            tasks = [self.start_agent(strategy) for strategy in strategies]
-            await asyncio.gather(*tasks)
-            logger.log("info", "All agents initialized successfully.")
+        Fetches data from an external API with retry and fallback.
 
-        except Exception as e:
-            logger.log("error", f"Error initializing agents: {str(e)}")
-            handle_errors(e)
-
-    async def start_agent(self, strategy):
-        """
-        Start an individual agent with the specified strategy.
-        The agent's state is stored in the MySQL database for monitoring.
-        
         Parameters:
-            strategy (dict): Strategy details including the name and execution interval.
+            api_url (str): The API endpoint to call.
+
+        Returns:
+            dict: Response data if successful.
         """
-        try:
-            logger.log("info", f"Starting agent for strategy: {strategy['name']}")
+        response = requests.get(api_url)
+        response.raise_for_status()  # Raises HTTPError for bad responses
+        logger.info(f"Data successfully fetched from {api_url}")
+        return response.json()
 
-            while True:
-                await self.store_agent_state_in_db(strategy, "running")
-                await asyncio.sleep(strategy["interval"])  # Defines the agent's operational cycle
-                logger.log("info", f"Agent for {strategy['name']} completed a cycle.")
-
-        except Exception as e:
-            logger.log("error", f"Error in agent {strategy['name']}: {str(e)}")
-            handle_errors(e)
-
-    async def store_agent_state_in_db(self, strategy, status):
+    @retry(retries=3, delay=1, backoff=2, fallback_function=lambda: {"status": "fallback"})
+    def update_transaction(self, transaction_id, data):
         """
-        Store the current operational state of the agent in the database.
-        This helps track whether agents are active, paused, or stopped.
-        
+        Update transaction data with a retry mechanism for resiliency.
+        Includes a fallback that logs failed transactions as 'pending'.
+
         Parameters:
-            strategy (dict): Strategy details.
-            status (str): Current status of the agent ("running", "stopped", etc.).
+            transaction_id (int): ID of the transaction.
+            data (dict): Transaction data to update.
+
+        Returns:
+            dict: API response if successful; 'fallback' status otherwise.
         """
         try:
-            connection = db_manager.get_connection()
-            cursor = connection.cursor()
-
-            # Insert the agent's state into the `agents` table
-            query = """
-                INSERT INTO agents (strategy_name, status, timestamp)
-                VALUES (%s, %s, NOW())
-            """
-            data = (strategy["name"], status)
-            cursor.execute(query, data)
-            connection.commit()
-            cursor.close()
-
-            logger.log("info", f"Agent {strategy['name']} state stored in database: {status}")
-
-        except mysql.connector.Error as err:
-            logger.log("error", f"MySQL error during agent state storage: {err}")
-            handle_errors(err)
-
-    def stop_all_agents(self):
-        """
-        Gracefully stop all active agents and log their states in the database.
-        """
-        logger.log("info", "Stopping all agents.")
-        for agent in self.agents:
-            self.store_agent_state_in_db(agent, "stopped")
-        logger.log("info", "All agents have been stopped and their states updated.")
+            response = requests.post(f"https://example.com/api/update/{transaction_id}", json=data)
+            response.raise_for_status()
+            logger.info(f"Transaction {transaction_id} updated successfully.")
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to update transaction {transaction_id}: {e}")
+            raise

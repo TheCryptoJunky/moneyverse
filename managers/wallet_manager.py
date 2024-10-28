@@ -9,6 +9,9 @@ from src.utils.error_handler import handle_errors
 from src.list_manager import ListManager
 from src.services.gas_price_service import GasPriceService
 from src.services.aggregator_service import AggregatorService
+from utils.retry_decorator import retry  # Import retry decorator
+
+import mysql.connector
 
 logger = CentralizedLogger()
 list_manager = ListManager()
@@ -133,6 +136,33 @@ class WalletManager:
         except Exception as e:
             logger.log("error", f"Error during fund distribution: {str(e)}")
             handle_errors(e)
+
+    @retry(retries=4, delay=2, backoff=2, fallback_function=lambda: logger.error("Failed to insert wallet state after retries"))
+    def store_wallet_state_in_db(self, wallet_id, state):
+        """
+        Store the current state of a wallet in the database with retries.
+        
+        Parameters:
+            wallet_id (str): The wallet identifier.
+            state (str): State of the wallet (e.g., 'active', 'inactive').
+        """
+        try:
+            connection = mysql.connector.connect(
+                host="localhost",
+                user="username",
+                password="password",
+                database="wallet_db"
+            )
+            cursor = connection.cursor()
+            query = "INSERT INTO wallet_states (wallet_id, state, timestamp) VALUES (%s, %s, NOW())"
+            cursor.execute(query, (wallet_id, state))
+            connection.commit()
+            cursor.close()
+            connection.close()
+            logger.info(f"Successfully stored wallet state for {wallet_id}: {state}")
+        except mysql.connector.Error as e:
+            logger.error(f"MySQL error storing wallet state for {wallet_id}: {e}")
+            raise
 
     def validate_wallets_against_lists(self):
         """
