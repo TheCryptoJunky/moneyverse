@@ -1,109 +1,51 @@
-import argparse
-import all_logging
-from agents import Agent
-from envs import TradingEnvironment
-from mev_strategies import MEVStrategy
-from utils import parse_arguments
+# Full file path: /moneyverse/main.py
 
-def main_loop(args):
-    """
-    Main loop of the trading bot.
+import asyncio
+from strategies.mev_strategy import MEV_STRATEGIES
+from src.managers.wallet_swarm import WalletSwarm
 
-    Args:
-        args (argparse.Namespace): Command-line arguments.
+# Initialize WalletSwarm or any other required components
+wallet_swarm = WalletSwarm()
 
-    Returns:
-        None
-    """
-    # Initialize the trading environment
-    env = TradingEnvironment()
+class StrategyExecutor:
+    def __init__(self, strategy_name, wallet_swarm):
+        self.strategy_name = strategy_name
+        self.wallet_swarm = wallet_swarm
+        self.strategy = self.load_strategy()
 
-    # Initialize the reinforcement learning agent
-    agent = Agent(env)
+    def load_strategy(self):
+        """Dynamically load and initialize the selected strategy."""
+        if self.strategy_name in MEV_STRATEGIES:
+            return MEV_STRATEGIES[self.strategy_name](self.wallet_swarm)
+        else:
+            raise ValueError(f"Strategy '{self.strategy_name}' not found in MEV_STRATEGIES")
 
-    # Initialize the MEV strategy
-    mev_strategy = MEVStrategy()
+    async def execute_strategy(self, market_data):
+        """Execute the loaded strategy by identifying opportunities and executing trades."""
+        opportunities = self.strategy.identify_opportunities(market_data)
+        if opportunities:
+            for opportunity in opportunities:
+                profit = self.strategy.execute(opportunity)
+                print(f"Executed trade with expected profit: {profit}")
 
-    # Run the main loop
-    while True:
-        # Get the current state of the environment
-        state = env.reset()
+async def main():
+    # Example: Choose strategy based on input or config
+    strategy_name = input("Enter the strategy to execute: ")
+    strategy_executor = StrategyExecutor(strategy_name, wallet_swarm)
 
-        # Select an action using the agent
-        action = agent.select_action(state)
+    # Sample market data (replace with actual data fetch in production)
+    market_data = {
+        'exchange1': 5000,
+        'exchange2': 5100,
+        'exchange3': 5050
+    }
 
-        # Apply the MEV strategy
-        mev_strategy.apply(action)
+    try:
+        # Run the selected strategy
+        await strategy_executor.execute_strategy(market_data)
+    except ValueError as e:
+        print(e)
 
-        # Take a step in the environment
-        next_state, reward, done, _ = env.step(action)
-
-        # Update the agent
-        agent.update(state, action, reward, next_state, done)
-
-        # Log the reward
-        logging.info(f"Reward: {reward}")
-
+# Run the main loop
 if __name__ == "__main__":
-    # Parse command-line arguments
-    args = parse_arguments()
-
-    # Run the main loop
-    main_loop(args)
-
-import os
-import time
-import numpy as np
-import torch
-from agents import dqn_agent, pgm_agent, actor_critic_agent, marl_agent
-try:
-    from mev_strategies import strategy1, strategy2
-except ImportError:
-    import sys
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-    from mev_strategies import strategy1, strategy2
-from gui import trading_bot_gui
-
-class TradingBot:
-    def __init__(self):
-        self.net_asset_value = 1.0
-        self.current_time = 0
-        self.rl_algorithm = None
-        self.mev_strategy = None
-
-    def select_rl_algorithm(self, algorithm):
-        if algorithm == 'DQN':
-            self.rl_algorithm = dqn_agent.DQNAgent()
-        elif algorithm == 'PGM':
-            self.rl_algorithm = pgm_agent.PGMAgent()
-        elif algorithm == 'Actor-Critic':
-            self.rl_algorithm = actor_critic_agent.ActorCriticAgent()
-        elif algorithm == 'MARL':
-            self.rl_algorithm = marl_agent.MARLAgent()
-
-    def select_mev_strategy(self, strategy):
-        if strategy == 'strategy1':
-            self.mev_strategy = strategy1.Strategy1()
-        elif strategy == 'strategy2':
-            self.mev_strategy = strategy2.Strategy2()
-
-    def trade(self):
-        # Implement trading logic using selected RL algorithm and MEV strategy
-        pass
-
-    def update_net_asset_value(self):
-        # Update net asset value based on trading results
-        pass
-
-    def run(self):
-        while self.current_time < DEADLINE_HOURS:
-            self.select_rl_algorithm(np.random.choice(RL_ALGORITHMS))
-            self.select_mev_strategy(np.random.choice(MEV_STRATEGIES))
-            self.trade()
-            self.update_net_asset_value()
-            self.current_time += 1
-            time.sleep(3600)  # Wait for 1 hour
-
-if __name__ == '__main__':
-    trading_bot = TradingBot()
-    trading_bot.run()
+    asyncio.run(main())
