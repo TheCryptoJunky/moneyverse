@@ -2,31 +2,59 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Trading Bot Control</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Wallet Swarm Control</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body>
-    <h1>AI Trading Bot Control Panel</h1>
+    <h1>Wallet Swarm Dashboard</h1>
 
-    <!-- Bot Controls -->
-    <div id="bot-controls">
-        <h2>Bot Controls</h2>
-        <div class="bot-section">
-            <h3>Arbitrage Bot</h3>
-            <button onclick="startBot('arbitrage_bot')">Start</button>
-            <button onclick="stopBot('arbitrage_bot')">Stop</button>
-            <button onclick="pauseBot('arbitrage_bot')">Pause</button>
-        </div>
-    </div>
+    <h2>Total NAV: <span id="total-nav"></span></h2>
+    <h3>Strategy Control</h3>
+    <form id="strategy-form">
+        <label for="strategy">Select Strategy:</label>
+        <select id="strategy" name="strategy">
+            <option value="Arbitrage">Arbitrage</option>
+            <option value="FrontRunning">Front Running</option>
+            <option value="BackRunning">Back Running</option>
+            <option value="SandwichAttack">Sandwich Attack</option>
+        </select>
+        <button type="button" onclick="startStrategy()">Start Strategy</button>
+        <button type="button" onclick="stopStrategy()">Stop Strategy</button>
+    </form>
 
-    <!-- Performance Reports -->
-    <div id="performance-reports">
-        <h2>Performance Reports</h2>
-        <button onclick="generateReport()">Generate Report</button>
-        <div id="report-output"></div>
-    </div>
+    <h3>Wallets</h3>
+    <div id="wallets"></div>
 
-    <script src="{{ url_for('static', filename='control.js') }}"></script>
+    <script>
+        function fetchSwarmStatus() {
+            $.getJSON("/swarm_status", function(data) {
+                $('#total-nav').text(data.total_nav);
+                $('#wallets').empty();
+                data.wallets.forEach(wallet => {
+                    $('#wallets').append(`<p>Address: ${wallet.address} - Balance: ${wallet.balance}</p>`);
+                });
+            });
+        }
+
+        function startStrategy() {
+            const strategy = $('#strategy').val();
+            $.post("/start_strategy", { strategy: strategy }, function(response) {
+                alert(response.status);
+                fetchSwarmStatus();
+            });
+        }
+
+        function stopStrategy() {
+            $.post("/stop_strategy", function(response) {
+                alert(response.status);
+                fetchSwarmStatus();
+            });
+        }
+
+        $(document).ready(function() {
+            fetchSwarmStatus();
+            setInterval(fetchSwarmStatus, 5000);  // Refresh every 5 seconds
+        });
+    </script>
 </body>
 </html>
