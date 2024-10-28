@@ -13,6 +13,49 @@ class WalletSwarm:
     - mev_strategy (MEVStrategy): The MEV strategy used by the swarm.
     """
 
+    def __init__(self, mev_strategy=None, wallet_addresses=None):
+        self.wallets = []
+        self.mev_strategy = mev_strategy
+        self.wallet_addresses = wallet_addresses or []
+        for address in self.wallet_addresses:
+            self.add_wallet(address)
+
+    def add_wallet(self, address, initial_balance=0.0):
+        """
+        Add a new wallet to the swarm.
+        """
+        wallet = Wallet(address=address, balance=initial_balance)
+        self.wallets.append(wallet)
+
+    def remove_wallet(self, address):
+        """
+        Remove a wallet from the swarm by its address.
+        """
+        self.wallets = [w for w in self.wallets if w.address != address]
+
+    def transfer_asset(self, from_address, to_address, asset, amount):
+        """
+        Transfer an asset from one wallet to another or an external address.
+        """
+        from_wallet = next((w for w in self.wallets if w.address == from_address), None)
+        to_wallet = next((w for w in self.wallets if w.address == to_address), None)
+        if from_wallet and to_wallet and from_wallet.decrease_balance(asset, amount):
+            to_wallet.increase_balance(asset, amount)
+            return True
+        return False
+
+    def swap_asset(self, address, from_asset, to_asset, amount):
+        """
+        Swap one asset for another within a wallet using an aggregator.
+        """
+        wallet = next((w for w in self.wallets if w.address == address), None)
+        if wallet:
+            wallet.decrease_balance(from_asset, amount)
+            swapped_amount = amount * 0.99  # assuming 1% fee for swap
+            wallet.increase_balance(to_asset, swapped_amount)
+            return True
+        return False
+    
     def __init__(self, mev_strategy: MEVStrategy, wallet_addresses: List[str] = None):
         """
         Initializes a new WalletSwarm instance.

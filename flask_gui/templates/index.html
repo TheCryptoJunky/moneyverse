@@ -121,6 +121,97 @@
             setInterval(updateSwarmStatus, 5000);
             setInterval(updateNavChart, 60000);  // Fetch historical data every minute
         });
-    </script>
+        </script>
+
+        <!-- Total NAV and Wallet Details -->
+        <h3>Total NAV: <span id="total-nav"></span></h3>
+        <div id="wallets"></div>
+    
+        <!-- Add/Remove Wallets -->
+        <h3>Manage Wallets</h3>
+        <form id="add-wallet-form">
+            <label for="address">New Wallet Address:</label>
+            <input type="text" id="address" name="address" required>
+            <label for="initial_balance">Initial Balance:</label>
+            <input type="number" id="initial_balance" name="initial_balance" min="0" step="0.01">
+            <button type="button" onclick="addWallet()">Add Wallet</button>
+        </form>
+        <form id="remove-wallet-form">
+            <label for="remove_address">Remove Wallet Address:</label>
+            <input type="text" id="remove_address" name="remove_address" required>
+            <button type="button" onclick="removeWallet()">Remove Wallet</button>
+        </form>
+    
+        <!-- Transfer and Swap Assets -->
+        <h3>Transfer Assets</h3>
+        <form id="transfer-form">
+            <label for="from_address">From:</label>
+            <input type="text" id="from_address" name="from_address" required>
+            <label for="to_address">To:</label>
+            <input type="text" id="to_address" name="to_address" required>
+            <label for="asset">Asset:</label>
+            <input type="text" id="asset" name="asset" required>
+            <label for="amount">Amount:</label>
+            <input type="number" id="amount" name="amount" min="0" step="0.01" required>
+            <button type="button" onclick="transferAsset()">Transfer</button>
+        </form>
+    
+        <h3>Swap Assets</h3>
+        <form id="swap-form">
+            <label for="swap_address">Wallet Address:</label>
+            <input type="text" id="swap_address" name="swap_address" required>
+            <label for="from_asset">From Asset:</label>
+            <input type="text" id="from_asset" name="from_asset" required>
+            <label for="to_asset">To Asset:</label>
+            <input type="text" id="to_asset" name="to_asset" required>
+            <label for="swap_amount">Amount:</label>
+            <input type="number" id="swap_amount" name="swap_amount" min="0" step="0.01" required>
+            <button type="button" onclick="swapAsset()">Swap</button>
+        </form>
+    
+        <script>
+            // Function to fetch and display swarm status
+            function fetchSwarmStatus() {
+                $.getJSON("/swarm_status", function(data) {
+                    $('#total-nav').text(data.total_nav);
+                    $('#wallets').html(data.wallets.map(wallet => `
+                        <p>Address: ${wallet.address} - Balance: ${wallet.balance}</p>
+                    `).join(''));
+                });
+            }
+    
+            function addWallet() {
+                $.post("/add_wallet", $('#add-wallet-form').serialize(), function(response) {
+                    alert(response.status);
+                    fetchSwarmStatus();
+                });
+            }
+    
+            function removeWallet() {
+                $.post("/remove_wallet", { address: $('#remove_address').val() }, function(response) {
+                    alert(response.status);
+                    fetchSwarmStatus();
+                });
+            }
+    
+            function transferAsset() {
+                $.post("/transfer", $('#transfer-form').serialize(), function(response) {
+                    alert(response.status);
+                    fetchSwarmStatus();
+                });
+            }
+    
+            function swapAsset() {
+                $.post("/swap_assets", $('#swap-form').serialize(), function(response) {
+                    alert(response.status);
+                    fetchSwarmStatus();
+                });
+            }
+    
+            $(document).ready(function() {
+                fetchSwarmStatus();
+                setInterval(fetchSwarmStatus, 5000);  // Refresh every 5 seconds
+            });
+        </script>
 </body>
 </html>
