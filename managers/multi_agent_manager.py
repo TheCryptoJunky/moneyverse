@@ -1,11 +1,12 @@
+# Full file path: /moneyverse/managers/multi_agent_manager.py
+
 import time
 import threading
-import all_logging
 import gc  # Garbage collection
-
+import logging
 from config import Config  # Centralized configuration for API keys, etc.
-from transaction_manager import TransactionManager  # To register transactions
-from strategy_manager import StrategyManager  # For strategy execution
+from transaction_manager import TransactionManager  # Manages transactions
+from strategy_manager import StrategyManager  # Manages bot strategies
 from centralized_logger import CentralizedLogger  # For centralized logging
 
 # Initialize logger
@@ -13,13 +14,17 @@ logger = logging.getLogger(__name__)
 centralized_logger = CentralizedLogger()
 
 class MultiAgentManager:
+    """
+    Manages multiple bot agents, controlling their lifecycle (start, stop, restart) and logging their status.
+    """
+
     def __init__(self, config, strategy_manager, transaction_manager):
         self.config = config
         self.strategy_manager = strategy_manager
         self.transaction_manager = transaction_manager
-        self.bots = {}  # Dictionary to hold all active bots
-        self.stop_flags = {}  # Flags to safely stop bots
-        self.threads = {}  # To track running bot threads
+        self.bots = {}  # Holds active bot instances
+        self.stop_flags = {}  # Flags for safely stopping bots
+        self.threads = {}  # Tracks running bot threads
 
     def add_bot(self, bot_id, bot):
         """Adds a new bot and runs it in a separate thread."""
@@ -43,14 +48,14 @@ class MultiAgentManager:
 
         while not self.stop_flags[bot_id]:
             try:
-                bot.run()
+                bot.run()  # Bot execution logic
             except Exception as e:
                 logger.error(f"Error running bot {bot_id}: {e}")
             time.sleep(1)  # Adjust based on bot frequency
-            gc.collect()
+            gc.collect()  # Free up memory periodically
 
     def stop_bot(self, bot_id):
-        """Stops the bot by setting the stop flag and joining the thread."""
+        """Stops the bot by setting the stop flag and waiting for the thread to end."""
         if bot_id not in self.bots:
             logger.error(f"Bot with ID {bot_id} not found.")
             return
@@ -63,7 +68,7 @@ class MultiAgentManager:
         logger.info(f"Bot {bot_id} stopped and removed.")
 
     def stop_all_bots(self):
-        """Gracefully stops all bots."""
+        """Gracefully stops all active bots."""
         logger.info("Stopping all bots...")
         for bot_id in list(self.bots.keys()):
             self.stop_bot(bot_id)
@@ -76,9 +81,9 @@ class MultiAgentManager:
 
         logger.info(f"Restarting bot {bot_id}...")
         self.stop_bot(bot_id)
-        bot = self.strategy_manager.get_strategy(bot_id)  # Retrieve the bot again
+        bot = self.strategy_manager.get_strategy(bot_id)  # Retrieve the bot's strategy configuration
         self.add_bot(bot_id, bot)
 
     def get_active_bots(self):
-        """Returns a list of active bots."""
+        """Returns a list of currently active bots."""
         return list(self.bots.keys())
