@@ -1,14 +1,23 @@
-# File: /src/safety/safety_manager.py
+# Full file path: /moneyverse/managers/safety_manager.py
 
 from src.safety.poison_token_checker import PoisonTokenChecker
 from src.safety.reorg_detection import ReorgDetection
 from src.safety.circuit_breaker import CircuitBreaker
+import logging
+
+# Set up centralized logging
+logger = logging.getLogger(__name__)
 
 class SafetyManager:
-    def __init__(self, db_connection):
+    """
+    Manages safety checks for trading operations, including poison token detection, reorg monitoring, and circuit breakers.
+    """
+
+    def __init__(self, db_connection=None):
         """
-        Initializes the SafetyManager with all the safety checks (Poison Token Checker, Reorg Detection, Circuit Breaker).
-        :param db_connection: The active database connection, if any safety checks depend on it.
+        Initialize SafetyManager with essential safety checks.
+        
+        :param db_connection: Optional database connection if required by certain safety checks.
         """
         self.db_connection = db_connection
         self.token_checker = PoisonTokenChecker()
@@ -17,37 +26,50 @@ class SafetyManager:
 
     def check_token_safety(self, token_address):
         """
-        Checks if the given token address is safe to trade with.
-        Calls the PoisonTokenChecker to verify if the token is a scam or honeypot.
-
-        :param token_address: The blockchain address of the token to be checked.
-        :return: True if the token is safe to trade, False if it's a poison token.
+        Check if a given token is safe for trading.
+        
+        :param token_address: The blockchain address of the token.
+        :return: True if safe, False if identified as a poison token.
         """
-        if self.token_checker.is_poison_token(token_address):
-            print(f"Token {token_address} is flagged as a poison token.")
+        try:
+            is_poison = self.token_checker.is_poison_token(token_address)
+            if is_poison:
+                logger.warning(f"Token {token_address} flagged as a poison token.")
+                return False
+            logger.info(f"Token {token_address} passed safety check.")
+            return True
+        except Exception as e:
+            logger.error(f"Error in token safety check for {token_address}: {e}")
             return False
-        return True
 
     def check_for_reorgs(self):
         """
-        Checks if a blockchain reorganization is detected.
-        Calls ReorgDetection to verify blockchain consistency.
-
-        :return: True if a reorg is detected, False if the chain is stable.
+        Check for blockchain reorganizations.
+        
+        :return: True if a reorg is detected, False otherwise.
         """
-        if self.reorg_detection.detect_reorg():
-            print("Blockchain reorganization detected.")
-            return True
-        return False
+        try:
+            if self.reorg_detection.detect_reorg():
+                logger.warning("Blockchain reorganization detected.")
+                return True
+            logger.info("No blockchain reorganization detected.")
+            return False
+        except Exception as e:
+            logger.error(f"Error in reorg detection: {e}")
+            return False
 
     def check_circuit_breaker(self):
         """
-        Checks if any market circuit breakers are triggered.
-        Calls CircuitBreaker to check market conditions.
-
-        :return: True if the market is safe for trading, False if circuit breaker is triggered.
+        Check if the market circuit breaker is triggered.
+        
+        :return: True if the market is safe, False if conditions are unsafe.
         """
-        if not self.circuit_breaker.is_market_safe():
-            print("Market conditions are unsafe, circuit breaker triggered.")
+        try:
+            if not self.circuit_breaker.is_market_safe():
+                logger.warning("Circuit breaker triggered due to unsafe market conditions.")
+                return False
+            logger.info("Market conditions are safe.")
+            return True
+        except Exception as e:
+            logger.error(f"Error in circuit breaker check: {e}")
             return False
-        return True
