@@ -1,4 +1,4 @@
-import logging
+import all_logging
 
 class ReorgDetector:
     """

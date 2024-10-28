@@ -1,6 +1,6 @@
 # File: /src/logging/logger-config.py
 
-import logging
+import all_logging
 import sys
 from logging.handlers import RotatingFileHandler
 from centralized_logger import CentralizedLogger

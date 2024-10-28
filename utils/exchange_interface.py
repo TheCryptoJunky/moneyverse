@@ -1,6 +1,6 @@
 # /bot/src/rl_agent/exchange_interface.py
 
-import logging
+import all_logging
 from typing import Dict, List
 from web3 import Web3
 

@@ -2,7 +2,7 @@
 
 import tkinter as tk
 from tkinter import messagebox
-import logging
+import all_logging
 from src.database.database_manager import DatabaseManager
 from centralized_logger import CentralizedLogger
 from bot_manager import BotManager  # To interact with bots and view their status
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     root.mainloop()
 
 # gui.py
-import logging
+import all_logging
 import tkinter as tk
 
 class GUI:

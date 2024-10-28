@@ -1,5 +1,5 @@
 # goal_manager.py
-import logging
+import all_logging
 
 class GoalManager:
     def __init__(self, config):

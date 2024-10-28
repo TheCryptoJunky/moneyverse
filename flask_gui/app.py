@@ -1,12 +1,26 @@
 # File: flask_gui/app.py
+import sys
+import os
 
-from flask import Flask, render_template, request, jsonify
+# Adds the moneyverse root directory to sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from wallet.wallet_swarm import WalletSwarm
 from strategies.mev_strategy import MEV_STRATEGIES
+
+from wallet.wallet_swarm import WalletSwarm
+from strategies.mev_strategy import MEV_STRATEGIES
+
+try:
+    from flask import Flask, render_template, request, jsonify
+except ImportError as e:
+    print(f"Error importing Flask: {e}")
+    print("Make sure Flask is installed in your virtual environment.")
+    sys.exit(1)
 
 app = Flask(__name__)
 
 # Initialize the wallet swarm with some placeholder addresses
+
 wallet_swarm = WalletSwarm(mev_strategy=None, wallet_addresses=["0xWalletAddress1", "0xWalletAddress2"])
 
 @app.route('/')

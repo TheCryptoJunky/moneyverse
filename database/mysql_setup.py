@@ -3,7 +3,7 @@
 import subprocess
 import mysql.connector
 from mysql.connector import Error # type: ignore
-import logging
+import all_logging
 import os
 from dotenv import load_dotenv
 

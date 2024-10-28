@@ -1,5 +1,5 @@
 from prometheus_client import Counter, Summary, Gauge
-import logging
+import all_logging
 
 class AgentPerformanceExporter:
     """Exporter for agent-specific performance metrics using Prometheus."""

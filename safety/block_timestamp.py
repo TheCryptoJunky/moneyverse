@@ -1,4 +1,4 @@
-import logging
+import all_logging
 import time
 
 class BlockTimestampChecker:

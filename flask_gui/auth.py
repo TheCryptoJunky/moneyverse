@@ -2,7 +2,7 @@ import jwt
 import datetime
 from flask import jsonify, session
 import os
-import logging
+import all_logging
 
 # Secret key should be securely loaded from the environment
 SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")  # This should be securely set in production

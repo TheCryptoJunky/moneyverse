@@ -1,6 +1,6 @@
 # File: /src/utils/error_handler.py
 
-import logging
+import all_logging
 import traceback
 from centralized_logger import CentralizedLogger
 

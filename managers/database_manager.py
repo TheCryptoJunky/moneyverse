@@ -1,7 +1,7 @@
 # File: /src/database/database_manager.py
 
 import mysql.connector
-import logging
+import all_logging
 from mysql.connector import Error
 from dotenv import load_dotenv
 import os

@@ -1,5 +1,5 @@
 # trade.py
-import logging
+import all_logging
 import wallet
 
 class Trade:

@@ -1,7 +1,7 @@
 from prometheus_client import Gauge, start_http_server
 import psutil
 import time
-import logging
+import all_logging
 
 class PrometheusMetricsExporter:
     """Exporter for system and agent performance metrics using Prometheus."""

@@ -1,7 +1,7 @@
 # File: /src/managers/list_manager.py
 
 import mysql.connector
-import logging
+import all_logging
 from mysql.connector import Error
 
 class ListManager:

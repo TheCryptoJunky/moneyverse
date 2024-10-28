@@ -1,7 +1,7 @@
 # File: /src/safety/block_finality.py
 
 import time
-import logging
+import all_logging
 from web3 import Web3
 
 class BlockFinalityChecker:

@@ -1,6 +1,6 @@
 # File: /src/logging/centralized_logger.py
 
-import logging
+import all_logging
 from logging.handlers import RotatingFileHandler
 import os
 import mysql.connector

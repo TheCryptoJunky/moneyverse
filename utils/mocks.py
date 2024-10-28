@@ -1,5 +1,5 @@
 # mocks.py
-import logging
+import all_logging
 import random
 
 def mock_wallet_balance(wallet_id):

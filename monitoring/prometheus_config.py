@@ -2,7 +2,7 @@ from prometheus_client import start_http_server, Summary, Counter, Gauge
 import mysql.connector
 from mysql.connector import Error
 import time
-import logging
+import all_logging
 
 # Initialize logger
 logging.basicConfig(level=logging.INFO)
