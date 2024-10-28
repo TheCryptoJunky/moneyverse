@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Dashboard</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <h1 class="text-center my-4">Bot Activity Dashboard</h1>
+
+    <!-- Bot Control Buttons -->
+    <div class="row mb-4">
+        <div class="col">
+            <h3>Bot Controls</h3>
+            <button class="btn btn-success" onclick="startBot('bot1')">Start Bot 1</button>
+            <button class="btn btn-danger" onclick="stopBot('bot1')">Stop Bot 1</button>
+            <!-- Add more buttons for other bots as needed -->
+        </div>
+    </div>
+
+    <!-- Collapsible Menu for Blacklist and Whitelist -->
+    <div id="accordion">
+
+        <!-- Blacklist Section -->
+        <div class="card">
+            <div class="card-header" id="headingTwo">
+                <h5 class="mb-0">
+                    <button class="btn btn-link collapsed" data-toggle="collapse" data-target="#collapseTwo" aria-expanded="false" aria-controls="collapseTwo">
+                        Blacklist
+                    </button>
+                </h5>
+            </div>
+            <div id="collapseTwo" class="collapse" aria-labelledby="headingTwo" data-parent="#accordion">
+                <div class="card-body">
+                    <table id="blacklistTable" class="display" style="width:100%">
+                        <thead>
+                            <tr>
+                                <th>Token Address</th>
+                                <th>Reason</th>
+                                <th>Date Added</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <button class="btn btn-primary" onclick="addBlacklist()">Add to Blacklist</button>
+                    <button class="btn btn-danger" onclick="removeBlacklist()">Remove from Blacklist</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Whitelist Section -->
+        <div class="card">
+            <div class="card-header" id="headingThree">
+                <h5 class="mb-0">
+                    <button class="btn btn-link collapsed" data-toggle="collapse" data-target="#collapseThree" aria-expanded="false" aria-controls="collapseThree">
+                        Whitelist
+                    </button>
+                </h5>
+            </div>
+            <div id="collapseThree" class="collapse" aria-labelledby="headingThree" data-parent="#accordion">
+                <div class="card-body">
+                    <table id="whitelistTable" class="display" style="width:100%">
+                        <thead>
+                            <tr>
+                                <th>Wallet Address</th>
+                                <th>Date Added</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <button class="btn btn-primary" onclick="addWhitelist()">Add to Whitelist</button>
+                    <button class="btn btn-danger" onclick="removeWhitelist()">Remove from Whitelist</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+<!-- Bootstrap JS for Collapsible -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- DataTables Initialization -->
+<script>
+    $(document).ready(function() {
+        $('#blacklistTable').DataTable({
+            "ajax": "/api/blacklist",
+            "columns": [
+                { "data": "token_address" },
+                { "data": "reason" },
+                { "data": "date_added" }
+            ]
+        });
+
+        $('#whitelistTable').DataTable({
+            "ajax": "/api/whitelist",
+            "columns": [
+                { "data": "wallet_address" },
+                { "data": "date_added" }
+            ]
+        });
+    });
+
+    function startBot(botName) {
+        $.post(`/api/bot/start/${botName}`, function(data) {
+            alert(data.message);
+        }).fail(function(xhr) {
+            alert(`Error: ${xhr.responseText}`);
+        });
+    }
+
+    function stopBot(botName) {
+        $.post(`/api/bot/stop/${botName}`, function(data) {
+            alert(data.message);
+        }).fail(function(xhr) {
+            alert(`Error: ${xhr.responseText}`);
+        });
+    }
+
+    function addBlacklist() {
+        const tokenAddress = prompt("Enter Token Address");
+        const reason = prompt("Enter Reason for Blacklisting");
+        $.post("/api/blacklist/add", { token_address: tokenAddress, reason: reason }, function(data) {
+            alert(data.message);
+        }).fail(function(xhr) {
+            alert(`Error: ${xhr.responseText}`);
+        });
+    }
+
+    function removeBlacklist() {
+        const tokenAddress = prompt("Enter Token Address to Remove");
+        $.post("/api/blacklist/remove", { token_address: tokenAddress }, function(data) {
+            alert(data.message);
+        }).fail(function(xhr) {
+            alert(`Error: ${xhr.responseText}`);
+        });
+    }
+
+    function addWhitelist() {
+        const walletAddress = prompt("Enter Wallet Address");
+        $.post("/api/whitelist/add", { wallet_address: walletAddress }, function(data) {
+            alert(data.message);
+        }).fail(function(xhr) {
+            alert(`Error: ${xhr.responseText}`);
+        });
+    }
+
+    function removeWhitelist() {
+        const walletAddress = prompt("Enter Wallet Address to Remove");
+        $.post("/api/whitelist/remove", { wallet_address: walletAddress }, function(data) {
+            alert(data.message);
+        }).fail(function(xhr) {
+            alert(`Error: ${xhr.responseText}`);
+        });
+    }
+</script>
+
+</body>
+</html>

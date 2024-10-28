@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Trading Bot Control</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>AI Trading Bot Control Panel</h1>
+
+    <!-- Bot Controls -->
+    <div id="bot-controls">
+        <h2>Bot Controls</h2>
+        <div class="bot-section">
+            <h3>Arbitrage Bot</h3>
+            <button onclick="startBot('arbitrage_bot')">Start</button>
+            <button onclick="stopBot('arbitrage_bot')">Stop</button>
+            <button onclick="pauseBot('arbitrage_bot')">Pause</button>
+        </div>
+    </div>
+
+    <!-- Performance Reports -->
+    <div id="performance-reports">
+        <h2>Performance Reports</h2>
+        <button onclick="generateReport()">Generate Report</button>
+        <div id="report-output"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='control.js') }}"></script>
+</body>
+</html>

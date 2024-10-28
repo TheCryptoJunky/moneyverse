@@ -6,3 +6,44 @@ pandas==1.4.3
 ccxt==1.94.0
 flask==2.2.2
 os
+
+# Other Dependencies
+python-dotenv==1.0.1
+matplotlib==3.9.2
+requests==2.32.3
+aiohttp==3.10.10
+pytz==2024.2
+SQLAlchemy==1.4.15
+
+# AI and Machine Learning Libraries
+tensorflow==2.17.0
+torch==2.5.0
+stable-baselines3==2.3.2
+
+# Reinforcement Learning
+gymnasium==0.29.1
+
+# Data Handling and Scientific Libraries
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.5.2
+scipy==1.14.1
+
+# Trading API Clients (DEX, CEX)
+ccxt==4.4.21
+web3==5.24.0
+
+# Database and ORM Libraries
+SQLAlchemy==1.4.15
+PyMySQL==1.0.2
+mysqlclient==2.2.5
+
+# Logging and Monitoring
+loguru==0.5.3
+prometheus-client==0.21.0
+
+# API Integration and Web Servers
+fastapi==0.65.2
+uvicorn==0.32.0
+gunicorn==23.0.0
+
