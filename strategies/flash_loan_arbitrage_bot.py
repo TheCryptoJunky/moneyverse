@@ -1,3 +1,5 @@
+# Full file path: /moneyverse/strategies/flash_loan_arbitrage_bot.py
+
 import asyncio
 from ai.agents.rl_agent import RLTradingAgent
 from centralized_logger import CentralizedLogger
@@ -6,62 +8,118 @@ from src.managers.risk_manager import RiskManager
 from market_data import MarketDataAPI
 from src.safety.safety_manager import SafetyManager
 from src.utils.error_handler import handle_errors
+from ai.rl_algorithms import DDPGAgent, PPOAgent, LSTM_MemoryAgent, MARLAgent
 
 # Initialize components
 logger = CentralizedLogger()
-rl_agent = RLTradingAgent(environment="flash_loan_arbitrage")
 transaction_manager = TransactionManager()
 risk_manager = RiskManager()
 safety_manager = SafetyManager()
 market_data_api = MarketDataAPI()
 
+# Initialize multiple RL agents for dynamic selection, including memory-based LSTM
+ddpg_agent = DDPGAgent(environment="flash_loan_arbitrage")
+ppo_agent = PPOAgent(environment="flash_loan_arbitrage")
+lstm_agent = LSTM_MemoryAgent(environment="flash_loan_arbitrage")
+marl_agent = MARLAgent(environment="flash_loan_arbitrage")
+
+# Track performance for each agent
+agent_performance = {"DDPG": 0, "PPO": 0, "LSTM": 0, "MARL": 0}
+
 class FlashLoanArbitrageBot:
     def __init__(self):
         self.running = True
+        self.rl_agent = None
+        self.select_agent()  # Initialize with the best performing agent
+
+    def select_agent(self):
+        """Select the best-performing agent based on recent performance metrics."""
+        best_agent_name = max(agent_performance, key=agent_performance.get)
+        self.rl_agent = {
+            "DDPG": ddpg_agent,
+            "PPO": ppo_agent,
+            "LSTM": lstm_agent,
+            "MARL": marl_agent,
+        }[best_agent_name]
+        logger.log_info(f"Selected agent: {best_agent_name}")
+
+    async def fetch_market_data(self):
+        """Fetch market data specifically for flash loan arbitrage."""
+        try:
+            market_data = await market_data_api.get_flash_loan_data()
+            logger.log_info(f"Fetched flash loan market data: {market_data}")
+            return market_data
+        except Exception as e:
+            logger.log_error(f"Failed to fetch market data: {e}")
+            handle_errors(e)
+            return None
+
+    def ai_decision(self, market_data):
+        """Make an AI-driven trading decision using the selected RL agent."""
+        try:
+            action = self.rl_agent.decide_action(market_data)
+            logger.log_info(f"AI decision by {self.rl_agent.__class__.__name__}: {action}")
+            return action
+        except Exception as e:
+            logger.log_error(f"Error in AI decision-making: {e}")
+            handle_errors(e)
+            return None
+
+    async def execute_trade(self, trade_data):
+        """Execute the trade and update agent performance based on success or failure."""
+        trade_success = await transaction_manager.execute_trade(trade_data)
+        agent_type = self.rl_agent.__class__.__name__
+
+        if trade_success:
+            logger.log_info(f"Trade executed successfully: {trade_data}")
+            agent_performance[agent_type] += 1  # Reward successful trade
+        else:
+            logger.log_warning(f"Trade failed: {trade_data}")
+            agent_performance[agent_type] -= 1  # Penalize failed trade
 
     async def run(self):
-        """
-        Main loop for running the flash loan arbitrage bot.
-        """
-        logger.log_info("Starting Flash Loan Arbitrage Bot...")
-
+        """Main loop to operate the flash loan arbitrage bot with dynamic agent switching."""
+        logger.log_info("Starting Flash Loan Arbitrage Bot with dynamic agent selection...")
         try:
             while self.running:
-                # Step 1: Fetch market data for arbitrage
-                market_data = await market_data_api.get_flash_loan_data()
-                logger.log_info(f"Fetched flash loan market data: {market_data}")
+                # Re-evaluate and select the best-performing agent if necessary
+                if max(agent_performance.values()) != agent_performance[self.rl_agent.__class__.__name__]:
+                    self.select_agent()
 
-                # Step 2: AI-driven decision making for flash loan arbitrage
-                action = rl_agent.decide_action(market_data)
-                logger.log_info(f"RL action decision: {action}")
+                market_data = await self.fetch_market_data()
+                if market_data is None:
+                    logger.log_warning("No market data available; retrying in 30 seconds.")
+                    await asyncio.sleep(30)
+                    continue
 
-                # Step 3: Risk checks before executing flash loan trades
-                if risk_manager.is_risk_compliant(market_data):
-                    trade_data = {
-                        "source_wallet": action["source_wallet"],
-                        "amount": action["amount"],
-                        "trade_type": "flash_loan_arbitrage"
-                    }
+                action = self.ai_decision(market_data)
+                if action is None:
+                    logger.log_warning("AI decision failed; retrying in 30 seconds.")
+                    await asyncio.sleep(30)
+                    continue
 
-                    # Step 4: Execute trade using Transaction Manager
-                    trade_success = await transaction_manager.execute_trade(trade_data)
-                    if trade_success:
-                        logger.log_info(f"Trade executed: {trade_data}")
+                # Safety check before trade execution
+                if safety_manager.is_safe_to_proceed(trade_data=action):
+                    if risk_manager.is_risk_compliant(market_data):
+                        trade_data = {
+                            "source_wallet": action.get("source_wallet"),
+                            "amount": action.get("amount"),
+                            "trade_type": "flash_loan_arbitrage"
+                        }
+                        await self.execute_trade(trade_data)
                     else:
-                        logger.log_warning(f"Trade failed: {trade_data}")
+                        logger.log_warning("Risk thresholds exceeded. Skipping trade execution.")
                 else:
-                    logger.log_warning("Risk thresholds exceeded. Skipping trade execution.")
+                    logger.log_warning("Safety check failed. Aborting trade execution.")
 
-                await asyncio.sleep(30)  # Delay for the next cycle
+                await asyncio.sleep(30)  # Adjust based on desired trade frequency
 
         except Exception as e:
-            logger.log_error(f"Error in Flash Loan Arbitrage Bot: {str(e)}")
+            logger.log_error(f"Critical error in Flash Loan Arbitrage Bot: {e}")
             handle_errors(e)
 
     def stop(self):
-        """
-        Gracefully stop the bot.
-        """
+        """Stops the flash loan arbitrage bot."""
         logger.log_info("Stopping Flash Loan Arbitrage Bot...")
         self.running = False
 
