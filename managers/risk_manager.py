@@ -1,3 +1,5 @@
+# Full file path: /moneyverse/managers/risk_manager.py
+
 import asyncio
 from centralized_logger import CentralizedLogger
 from src.safety.circuit_breaker import CircuitBreaker
@@ -11,50 +13,53 @@ reorg_detection = ReorgDetection()
 list_manager = ListManager()
 
 class RiskManager:
+    """
+    Manages risk parameters for trading bots, monitoring and adjusting based on real-time data.
+    """
+
     def __init__(self):
         self.risk_thresholds = {
-            "volatility": 0.05,
-            "drawdown_limit": 0.1,
-            "position_size": 0.02
+            "volatility": 0.05,       # Maximum allowed volatility
+            "drawdown_limit": 0.1,    # Maximum drawdown limit
+            "position_size": 0.02     # Maximum position size as a percentage
         }
 
     async def monitor_risks(self):
         """
-        Asynchronously monitor risk parameters and adjust bot activity.
+        Continuously monitor risk factors and make adjustments to bot activity based on thresholds.
         """
-        logger.log("info", "Starting risk management monitoring...")
-
+        logger.log("info", "Risk management monitoring started.")
         try:
             while True:
-                # Fetch market data (volatility, position size, etc.)
+                # Fetch real-time market conditions
                 market_conditions = await self.fetch_market_conditions()
 
-                # Check for circuit breaker triggers
+                # Check for circuit breaker activation
                 if circuit_breaker.is_triggered():
-                    logger.log("warning", "Circuit breaker triggered. Stopping bots.")
+                    logger.log("warning", "Circuit breaker triggered. Halting all bots.")
                     self.stop_bots()
                     continue
 
-                # Detect reorganization risks
+                # Detect blockchain reorg risks
                 if reorg_detection.is_reorg_detected():
-                    logger.log("warning", "Reorg detected. Pausing bots.")
+                    logger.log("warning", "Blockchain reorg detected. Pausing bots.")
                     self.pause_bots()
                     continue
 
-                # Check risk thresholds
+                # Evaluate if risk thresholds are exceeded
                 if self.is_risk_exceeded(market_conditions):
                     logger.log("warning", "Risk thresholds exceeded. Adjusting bot activity.")
                     self.adjust_bot_activity(market_conditions)
 
-                await asyncio.sleep(30)  # Monitoring interval
+                await asyncio.sleep(30)  # Interval for checking risks
 
         except Exception as e:
-            logger.log("error", f"Error during risk monitoring: {str(e)}")
+            logger.log("error", f"Error in risk monitoring: {e}")
             handle_errors(e)
 
     def is_risk_exceeded(self, market_conditions):
         """
-        Check if the current market conditions exceed risk thresholds.
+        Determines if any current market condition exceeds defined risk thresholds.
         """
         volatility = market_conditions.get("volatility")
         position_size = market_conditions.get("position_size")
@@ -63,32 +68,30 @@ class RiskManager:
             return True
         if position_size > self.risk_thresholds["position_size"]:
             return True
-
         return False
 
     async def fetch_market_conditions(self):
         """
-        Fetch real-time market conditions (e.g., volatility, drawdowns, etc.).
+        Fetch current market conditions such as volatility and position size.
         """
-        # Mock function for real-time data
-        await asyncio.sleep(1)  # Simulate API call
-        return {"volatility": 0.03, "position_size": 0.01}
+        await asyncio.sleep(1)  # Simulating an API call delay
+        return {"volatility": 0.03, "position_size": 0.01}  # Sample data; replace with actual API call
 
     def adjust_bot_activity(self, market_conditions):
         """
-        Adjust the activity of bots based on risk levels.
+        Adjusts bot operations based on current risk levels.
         """
-        # Logic to adjust bots (e.g., reduce position size, pause high-risk bots)
-        logger.log("info", "Adjusting bot activity based on risk levels.")
+        logger.log("info", "Adjusting bot activity due to risk level.")
+        # Logic to adjust bots (e.g., reduce trade sizes or halt specific bots)
 
     def stop_bots(self):
         """
-        Stop all bots due to a critical risk event (e.g., circuit breaker triggered).
+        Immediately stop all bot operations due to critical risk.
         """
-        logger.log("critical", "Stopping all bots due to critical risk event.")
+        logger.log("critical", "All bots stopped due to critical risk event.")
 
     def pause_bots(self):
         """
-        Temporarily pause bot activity due to a temporary risk event (e.g., reorg detected).
+        Temporarily pause bots due to a transient risk event.
         """
-        logger.log("warning", "Pausing bots due to temporary risk event.")
+        logger.log("warning", "Bots paused due to transient risk.")
