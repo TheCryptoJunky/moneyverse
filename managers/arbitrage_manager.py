@@ -1,3 +1,5 @@
+# Full file path: /moneyverse/managers/arbitrage_manager.py
+
 import asyncio
 from centralized_logger import CentralizedLogger
 from ai.agents.rl_agent import RLTradingAgent
@@ -15,6 +17,7 @@ list_manager = ListManager()
 class ArbitrageManager:
     def __init__(self):
         self.bots = []
+        self.active_tasks = []
 
     async def start_arbitrage_bots(self, strategies):
         """
@@ -27,7 +30,7 @@ class ArbitrageManager:
             if self.is_valid_strategy(strategy):
                 tasks.append(self.run_arbitrage_bot(strategy))
 
-        await asyncio.gather(*tasks)
+        self.active_tasks = await asyncio.gather(*tasks)
 
     async def run_arbitrage_bot(self, strategy):
         """
@@ -65,9 +68,12 @@ class ArbitrageManager:
             return False
         return True
 
-    def stop_arbitrage_bots(self):
+    async def stop_arbitrage_bots(self):
         """
-        Stop all running arbitrage bots.
+        Stop all running arbitrage bots gracefully.
         """
         logger.log("info", "Stopping arbitrage bots...")
-        # Logic for gracefully stopping the bots (e.g., via cancellation or a signal)
+        for task in self.active_tasks:
+            task.cancel()
+        await asyncio.gather(*self.active_tasks, return_exceptions=True)
+        self.active_tasks.clear()
