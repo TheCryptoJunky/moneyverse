@@ -1,5 +1,8 @@
+# Full file path: /moneyverse/managers/strategy_manager.py
+
 import asyncio
 import mysql.connector
+import json
 from centralized_logger import CentralizedLogger
 from src.list_manager import ListManager
 from src.utils.error_handler import handle_errors
@@ -15,15 +18,23 @@ class StrategyManager:
     """
 
     def __init__(self, db_config, api_configs, config_file_path):
+        """
+        Initializes StrategyManager with database, API configurations, and a config file path.
+        
+        Parameters:
+            db_config (dict): Database connection settings.
+            api_configs (list): List of API configurations, each containing details like name, url, and rate limits.
+            config_file_path (str): Path to a local configuration file with predefined strategies.
+        """
         self.strategies = []
         self.db_config = db_config
         self.config_file_path = config_file_path
         self.connection = self.connect_db() if db_config else None
-        self.source_selector = SourceSelector(api_configs)
+        self.source_selector = SourceSelector(api_configs)  # Initialize SourceSelector with API configurations
         self.enabled_sources = {"database": db_config is not None, "config_file": True}
 
     def connect_db(self):
-        """Establishes a database connection using provided configurations."""
+        """Establishes a database connection using the provided configuration."""
         try:
             connection = mysql.connector.connect(
                 host=self.db_config["host"],
@@ -72,7 +83,7 @@ class StrategyManager:
         return True
 
     async def fetch_strategies_from_db(self):
-        """Fetch strategies from the database."""
+        """Fetch strategies from the database asynchronously."""
         query = "SELECT name, interval FROM strategies"
         try:
             cursor = self.connection.cursor(dictionary=True)
@@ -87,7 +98,7 @@ class StrategyManager:
             return []
 
     def fetch_strategies_from_config(self):
-        """Load strategies from a configuration file."""
+        """Load strategies from a local configuration file."""
         try:
             with open(self.config_file_path, 'r') as file:
                 strategies = json.load(file)
@@ -97,3 +108,29 @@ class StrategyManager:
             logger.log("error", f"Config file not found: {e}")
             handle_errors(e)
             return []
+
+# --- Example Usage of StrategyManager with SourceSelector ---
+
+# Database configuration settings
+db_config = {
+    "host": "localhost",
+    "user": "username",
+    "password": "password",
+    "database": "strategies_db"
+}
+
+# List of API configurations for SourceSelector
+api_configs = [
+    {"name": "API1", "url": "https://example.com/api1/strategies", "headers": {}, "cost_per_request": 0.05, "rate_limit": 1000},
+    {"name": "API2", "url": "https://example.com/api2/strategies", "headers": {}, "cost_per_request": 0.03, "rate_limit": 800}
+]
+
+# Path to the configuration file
+config_file_path = "strategies_config.json"
+
+# Initialize StrategyManager with all source configurations
+strategy_manager = StrategyManager(db_config, api_configs, config_file_path)
+
+# Run load_strategies to dynamically load strategies from the optimal source
+if __name__ == "__main__":
+    asyncio.run(strategy_manager.load_strategies())
