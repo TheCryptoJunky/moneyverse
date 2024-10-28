@@ -6,9 +6,8 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from wallet.wallet_swarm import WalletSwarm
 from strategies.mev_strategy import MEV_STRATEGIES
-
-from wallet.wallet_swarm import WalletSwarm
-from strategies.mev_strategy import MEV_STRATEGIES
+from flask import Flask, jsonify, request
+from moneyverse.managers.wallet_manager import WalletManager
 
 try:
     from flask import Flask, render_template, request, jsonify
@@ -84,5 +83,24 @@ def swap_assets():
         return jsonify({"status": "Swap successful"}), 200
     return jsonify({"error": "Swap failed"}), 400
 
+wallet_manager = WalletManager()
+
+@app.route("/wallets", methods=["GET"])
+def get_wallets():
+    return jsonify(wallet_manager.wallets)
+
+@app.route("/rebalance", methods=["POST"])
+async def rebalance_wallets():
+    await wallet_manager.ai_autonomous_rebalance()
+    return jsonify({"status": "Rebalancing executed"})
+
+@app.route("/add_wallet", methods=["POST"])
+def add_wallet():
+    data = request.json
+    wallet_id = data["wallet_id"]
+    balance = data["balance"]
+    wallet_manager.wallets.append({"wallet_id": wallet_id, "balance": balance, "status": "active"})
+    return jsonify({"status": f"Wallet {wallet_id} added with balance {balance}"})
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(port=5000)
