@@ -1,0 +1,34 @@
+name: myenv
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11.10
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - sqlalchemy
+  - flask
+  - requests
+  - aiohttp
+  - pytz
+  - pymysql
+  - loguru           
+  - fastapi
+  - uvicorn
+  - web3
+  - pip                             # Include pip for additional installations
+  - pip:
+    - prometheus-client==0.21.0     # Install via pip since it's not available via Conda
+    - gunicorn==23.0.0              # Install via pip since it's not available via Conda
+    - ccxt==4.4.21                  # Install via pip since it's not available via Conda
+    - torch==2.0.1
+    - torchvision==0.15.2
+    - tensorflow==2.17.0
+    - stable-baselines3==2.3.2
+    - python-dotenv==1.0.0
+    - mysqlclient
+    - gymnasium==0.29.1
+

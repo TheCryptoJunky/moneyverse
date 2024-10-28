@@ -1,5 +1,5 @@
 import argparse
-import logging
+import all_logging
 from agents import Agent
 from envs import TradingEnvironment
 from mev_strategies import MEVStrategy
