@@ -1,3 +1,5 @@
+# Full file path: /moneyverse/managers/transaction_manager.py
+
 import asyncio
 import mysql.connector
 from centralized_logger import CentralizedLogger
@@ -7,22 +9,23 @@ from src.database.database_manager import DatabaseManager
 logger = CentralizedLogger()
 db_manager = DatabaseManager()
 
-class MultiAgentManager:
+class TransactionManager:
+    """
+    Manages the lifecycle of trading agents (bots) by initializing, tracking, and stopping them.
+    Each agent operates based on a specified strategy and updates its state in the database.
+    """
+
     def __init__(self):
         self.agents = []
 
     async def initialize_agents(self, strategies):
         """
-        Asynchronously initialize multiple agents (bots) based on the given strategies.
-        Stores the lifecycle events of the agents in the MySQL database.
+        Asynchronously initialize multiple agents based on the provided strategies.
+        Logs each initialization and stores lifecycle events in the database.
         """
         try:
             logger.log("info", "Initializing agents...")
-            tasks = []
-
-            for strategy in strategies:
-                tasks.append(self.start_agent(strategy))
-
+            tasks = [self.start_agent(strategy) for strategy in strategies]
             await asyncio.gather(*tasks)
             logger.log("info", "All agents initialized successfully.")
 
@@ -32,15 +35,18 @@ class MultiAgentManager:
 
     async def start_agent(self, strategy):
         """
-        Start an individual agent (bot) with the given strategy.
-        Store the agent's state in the MySQL database for tracking purposes.
+        Start an individual agent with the specified strategy.
+        The agent's state is stored in the MySQL database for monitoring.
+        
+        Parameters:
+            strategy (dict): Strategy details including the name and execution interval.
         """
         try:
             logger.log("info", f"Starting agent for strategy: {strategy['name']}")
 
             while True:
                 await self.store_agent_state_in_db(strategy, "running")
-                await asyncio.sleep(strategy["interval"])
+                await asyncio.sleep(strategy["interval"])  # Defines the agent's operational cycle
                 logger.log("info", f"Agent for {strategy['name']} completed a cycle.")
 
         except Exception as e:
@@ -49,20 +55,23 @@ class MultiAgentManager:
 
     async def store_agent_state_in_db(self, strategy, status):
         """
-        Store the current state of the agent in the MySQL database.
-        This helps keep track of active and paused agents.
+        Store the current operational state of the agent in the database.
+        This helps track whether agents are active, paused, or stopped.
+        
+        Parameters:
+            strategy (dict): Strategy details.
+            status (str): Current status of the agent ("running", "stopped", etc.).
         """
         try:
             connection = db_manager.get_connection()
             cursor = connection.cursor()
 
-            # Insert agent state into the agents table
+            # Insert the agent's state into the `agents` table
             query = """
                 INSERT INTO agents (strategy_name, status, timestamp)
                 VALUES (%s, %s, NOW())
             """
             data = (strategy["name"], status)
-
             cursor.execute(query, data)
             connection.commit()
             cursor.close()
@@ -75,9 +84,9 @@ class MultiAgentManager:
 
     def stop_all_agents(self):
         """
-        Stop all active agents and log the state in the MySQL database.
+        Gracefully stop all active agents and log their states in the database.
         """
         logger.log("info", "Stopping all agents.")
-        # Logic for safely stopping agents
         for agent in self.agents:
             self.store_agent_state_in_db(agent, "stopped")
+        logger.log("info", "All agents have been stopped and their states updated.")
