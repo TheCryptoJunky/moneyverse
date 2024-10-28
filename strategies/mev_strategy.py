@@ -1,12 +1,15 @@
+# Full file path: /moneyverse/strategies/mev_strategy.py
+
 import numpy as np
 from typing import List, Dict, Union
 from .utils import calculate_profit
+from src.managers.wallet_swarm import WalletSwarm
 
 class MEVStrategy:
     """
     Base class for MEV strategies, defining shared functionalities for inheriting classes.
     """
-    def __init__(self, wallet_swarm: 'WalletSwarm'):
+    def __init__(self, wallet_swarm: WalletSwarm):
         self.wallet_swarm = wallet_swarm
 
     def identify_opportunities(self, data: Union[Dict[str, float], List[Dict[str, float]]]):
@@ -15,8 +18,9 @@ class MEVStrategy:
     def execute(self, opportunity: Dict[str, float]) -> float:
         raise NotImplementedError("This method should be implemented by subclasses")
 
+
 class Arbitrage(MEVStrategy):
-    def __init__(self, wallet_swarm: 'WalletSwarm'):
+    def __init__(self, wallet_swarm: WalletSwarm):
         super().__init__(wallet_swarm)
         self.exchanges = ['Uniswap', 'SushiSwap', 'Curve']
 
@@ -41,10 +45,11 @@ class Arbitrage(MEVStrategy):
         profit = calculate_profit(opportunity['price1'], opportunity['price2'], amount)
         return profit
 
+
 class FrontRunning(MEVStrategy):
-    def __init__(self, wallet_swarm: 'WalletSwarm'):
+    def __init__(self, wallet_swarm: WalletSwarm, transaction_threshold: float = 1000):
         super().__init__(wallet_swarm)
-        self.transaction_threshold = 1000
+        self.transaction_threshold = transaction_threshold
 
     def identify_opportunities(self, transaction_data: List[Dict[str, float]]) -> List[Dict[str, float]]:
         return [
@@ -55,11 +60,12 @@ class FrontRunning(MEVStrategy):
     def execute(self, opportunity: Dict[str, float]) -> float:
         profit = opportunity['value'] * 0.01  # Assume 1% profit
         return profit
+
 
 class BackRunning(MEVStrategy):
-    def __init__(self, wallet_swarm: 'WalletSwarm'):
+    def __init__(self, wallet_swarm: WalletSwarm, transaction_threshold: float = 1000):
         super().__init__(wallet_swarm)
-        self.transaction_threshold = 1000
+        self.transaction_threshold = transaction_threshold
 
     def identify_opportunities(self, transaction_data: List[Dict[str, float]]) -> List[Dict[str, float]]:
         return [
@@ -71,10 +77,11 @@ class BackRunning(MEVStrategy):
         profit = opportunity['value'] * 0.01  # Assume 1% profit
         return profit
 
+
 class SandwichAttack(MEVStrategy):
-    def __init__(self, wallet_swarm: 'WalletSwarm'):
+    def __init__(self, wallet_swarm: WalletSwarm, transaction_threshold: float = 1000):
         super().__init__(wallet_swarm)
-        self.transaction_threshold = 1000
+        self.transaction_threshold = transaction_threshold
 
     def identify_opportunities(self, transaction_data: List[Dict[str, float]]) -> List[Dict[str, float]]:
         return [
@@ -86,6 +93,8 @@ class SandwichAttack(MEVStrategy):
         profit = opportunity['value'] * 0.02  # Assume 2% profit
         return profit
 
+
+# Dictionary of MEV strategies for dynamic usage
 MEV_STRATEGIES = {
     'Arbitrage': Arbitrage,
     'FrontRunning': FrontRunning,
