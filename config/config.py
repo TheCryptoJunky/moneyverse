@@ -1,29 +1,37 @@
+# moneyverse/config/config.py
+
 import os
 
-# Project settings
-PROJECT_NAME = "Moneyverse"
-PROJECT_VERSION = "1.0"
+# Trading settings
+TRADE_INTERVAL = 60  # 1 minute
+TRADE_PAIR = 'ETH-USDT'
+TRADE_QUANTITY = 100
 
-# API keys
-API_KEY_BSCSCAN = os.environ.get("API_KEY_BSCSCAN")
-API_KEY_ETHERSCAN = os.environ.get("API_KEY_ETHERSCAN")
-
-# Wallet settings
-WALLET_ADDRESS = os.environ.get("WALLET_ADDRESS")
-WALLET_PRIVATE_KEY = os.environ.get("WALLET_PRIVATE_KEY")
+# Wallet swarm settings
+WALLET_SWARM_SIZE = 10
+WALLET_SWARM_DIVERSIFICATION = 0.5
 
 # MEV strategy settings
-MEV_STRATEGY = "simple"  # Options: simple, advanced
-MEV_THRESHOLD = 0.5  # Threshold for MEV strategy
+MEV_STRATEGY = 'moving_average_crossover'
+MEV_SHORT_WINDOW = 10
+MEV_LONG_WINDOW = 30
 
-# Logging settings
-LOG_LEVEL = "INFO"
-LOG_FILE = "moneyverse.log"
+# Risk management settings
+RISK_MANAGER_ENABLED = True
+RISK_MANAGER_THRESHOLD = 0.05
 
-class Config:
-    risk_thresholds = {
-        'stop_loss': -0.1,  # 10% stop loss
-        'take_profit': 0.2,  # 20% take profit
-        'max_trade_frequency': 10  # max 10 trades per hour
-    }
-    trade_executor_sleep_time = 60 # 60 seconds
+# RL agent settings
+RL_AGENT_ENABLED = True
+RL_AGENT_TRAINING_INTERVAL = 3600  # 1 hour
+
+# Trade executor settings
+TRADE_EXECUTOR_ENABLED = True
+TRADE_EXECUTOR_TIMEOUT = 30
+
+# API keys
+API_KEY = 'YOUR_API_KEY'
+API_SECRET = 'YOUR_API_SECRET'
+
+# Exchange settings
+EXCHANGE_NAME = 'binance'
+EXCHANGE_API_URL = 'https://api.binance.com/api/v3'
