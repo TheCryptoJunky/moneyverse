@@ -1,128 +1,147 @@
 # Full file path: /moneyverse/strategies/revenge_bot.py
 
 import asyncio
-from ai.agents.rl_agent import RLTradingAgent
+from web3 import Web3
+from ai.models.mempool_scout import MempoolScoutAgent
+from ai.models.profit_optimizer import ProfitMaximizer
+from ai.models.transaction_predictor import TransactionPredictor  # AI model for transaction outcome prediction
 from centralized_logger import CentralizedLogger
-from src.managers.transaction_manager import TransactionManager
-from src.managers.risk_manager import RiskManager
-from market_data import MarketDataAPI
-from src.safety.safety_manager import SafetyManager
-from src.utils.error_handler import handle_errors
-from ai.rl_algorithms import DDPGAgent, PPOAgent, LSTM_MemoryAgent, MARLAgent
 
 # Initialize components
 logger = CentralizedLogger()
-transaction_manager = TransactionManager()
-risk_manager = RiskManager()
-safety_manager = SafetyManager()
-market_data_api = MarketDataAPI()
+mempool_scout = MempoolScoutAgent()
+profit_optimizer = ProfitMaximizer()
+tx_predictor = TransactionPredictor()  # AI model for predicting transaction success
 
-# Initialize multiple RL agents for dynamic selection, including memory-based LSTM
-ddpg_agent = DDPGAgent(environment="revenge_trading")
-ppo_agent = PPOAgent(environment="revenge_trading")
-lstm_agent = LSTM_MemoryAgent(environment="revenge_trading")
-marl_agent = MARLAgent(environment="revenge_trading")
+# Web3 connection (assuming local or Infura endpoint)
+web3 = Web3(Web3.HTTPProvider("https://mainnet.infura.io/v3/YOUR_INFURA_KEY"))
 
-# Track performance for each agent
-agent_performance = {"DDPG": 0, "PPO": 0, "LSTM": 0, "MARL": 0}
+async def place_counter_sandwich(entry, opportunity):
+    """Places a counter-sandwich attack to exploit an incoming sandwich attempt."""
+    logger.log_info(f"Counter-sandwich initiated for {entry}")
 
-class RevengeBot:
-    def __init__(self):
-        self.running = True
-        self.rl_agent = None
-        self.select_agent()  # Initialize with the best-performing agent
+    # Fetch details from opportunity (attacker transaction data)
+    attacker_tx = opportunity.get('attacker_tx')
+    target_tx = opportunity.get('target_tx')
+    
+    # Predict attacker outcome
+    attack_predicted_success = tx_predictor.predict_success(attacker_tx)
+    
+    if attack_predicted_success:
+        # Place buy order before the attacker’s buy
+        front_tx = {
+            'from': web3.eth.default_account,
+            'to': target_tx['to'],
+            'value': target_tx['value'],
+            'gas': target_tx['gas'] + 10000,
+            'gasPrice': web3.toWei(opportunity.get('high_gas_price'), 'gwei')
+        }
+        tx_hash_front = web3.eth.send_transaction(front_tx)
+        logger.log_info(f"Front-running transaction placed: {tx_hash_front.hex()}")
 
-    def select_agent(self):
-        """Select the best-performing agent based on recent trade performance."""
-        best_agent_name = max(agent_performance, key=agent_performance.get)
-        self.rl_agent = {
-            "DDPG": ddpg_agent,
-            "PPO": ppo_agent,
-            "LSTM": lstm_agent,
-            "MARL": marl_agent,
-        }[best_agent_name]
-        logger.log_info(f"Selected agent: {best_agent_name}")
+        # Place sell order after attacker’s buy
+        back_tx = {
+            'from': web3.eth.default_account,
+            'to': target_tx['to'],
+            'value': target_tx['value'],
+            'gas': target_tx['gas'] + 10000,
+            'gasPrice': web3.toWei(opportunity.get('low_gas_price'), 'gwei')
+        }
+        tx_hash_back = web3.eth.send_transaction(back_tx)
+        logger.log_info(f"Back-running transaction placed: {tx_hash_back.hex()}")
 
-    async def fetch_market_data(self):
-        """Fetch market data relevant to revenge trading opportunities."""
-        try:
-            market_data = await market_data_api.get_revenge_trading_data()
-            logger.log_info(f"Fetched revenge market data: {market_data}")
-            return market_data
-        except Exception as e:
-            logger.log_error(f"Failed to fetch market data: {e}")
-            handle_errors(e)
-            return None
+async def place_front_run(entry, opportunity):
+    """Places a front-running transaction to intercept a known profitable transaction."""
+    logger.log_info(f"Front-running transaction initiated for {entry}")
+    
+    # Retrieve attacker transaction and determine gas settings
+    attacker_tx = opportunity.get('attacker_tx')
+    adjusted_gas_price = int(attacker_tx['gasPrice'] * 1.1)  # 10% above attacker gas price
 
-    def ai_decision(self, market_data):
-        """Make an AI-driven trading decision using the selected RL agent."""
-        try:
-            action = self.rl_agent.decide_action(market_data)
-            logger.log_info(f"RL action decision: {action}")
-            return action
-        except Exception as e:
-            logger.log_error(f"Error in AI decision-making: {e}")
-            handle_errors(e)
-            return None
+    # Prediction for front-run success
+    if tx_predictor.predict_success(attacker_tx):
+        front_run_tx = {
+            'from': web3.eth.default_account,
+            'to': attacker_tx['to'],
+            'value': attacker_tx['value'],
+            'gas': attacker_tx['gas'] + 10000,
+            'gasPrice': adjusted_gas_price
+        }
+        tx_hash = web3.eth.send_transaction(front_run_tx)
+        logger.log_info(f"Front-running transaction placed successfully: {tx_hash.hex()}")
 
-    async def execute_trade(self, trade_data):
-        """Execute the trade and update agent performance based on success or failure."""
-        trade_success = await transaction_manager.execute_trade(trade_data)
-        agent_type = self.rl_agent.__class__.__name__
+async def place_back_run(entry, opportunity):
+    """Places a back-running transaction to capitalize on profitable trade setups left by other transactions."""
+    logger.log_info(f"Back-running transaction initiated for {entry}")
 
-        if trade_success:
-            logger.log_info(f"Trade executed: {trade_data}")
-            agent_performance[agent_type] += 1  # Reward successful trade
-        else:
-            logger.log_warning(f"Trade failed: {trade_data}")
-            agent_performance[agent_type] -= 1  # Penalize failed trade
+    # Get transaction data from opportunity
+    tx_data = opportunity.get('tx_data')
+    
+    # Adjust transaction settings and place back-run
+    back_run_tx = {
+        'from': web3.eth.default_account,
+        'to': tx_data['to'],
+        'value': tx_data['value'],
+        'gas': tx_data['gas'],
+        'gasPrice': int(tx_data['gasPrice'] * 0.95)  # Slightly lower gas to execute after main transaction
+    }
+    tx_hash = web3.eth.send_transaction(back_run_tx)
+    logger.log_info(f"Back-running transaction placed successfully: {tx_hash.hex()}")
 
-    async def run(self):
-        """Main loop to operate the revenge bot with dynamic agent selection."""
-        logger.log_info("Starting Revenge Bot with dynamic agent selection...")
-        try:
-            while self.running:
-                # Re-evaluate and select the best-performing agent if necessary
-                if max(agent_performance.values()) != agent_performance[self.rl_agent.__class__.__name__]:
-                    self.select_agent()
+async def place_liquidity_drain(entry, opportunity):
+    """Executes a liquidity drain on the target pool to prevent the attacker from profiting."""
+    logger.log_info(f"Liquidity drain transaction initiated for {entry}")
 
-                market_data = await self.fetch_market_data()
-                if market_data is None:
-                    logger.log_warning("No market data available; retrying in 30 seconds.")
-                    await asyncio.sleep(30)
-                    continue
+    # Get pool and transaction details from opportunity
+    pool_address = opportunity.get('pool_address')
+    withdrawal_amount = opportunity.get('withdrawal_amount')
 
-                action = self.ai_decision(market_data)
-                if action is None:
-                    logger.log_warning("AI decision failed; retrying in 30 seconds.")
-                    await asyncio.sleep(30)
-                    continue
+    # Create and send liquidity drain transaction
+    drain_tx = {
+        'from': web3.eth.default_account,
+        'to': pool_address,
+        'value': withdrawal_amount,
+        'gas': opportunity.get('gas_limit'),
+        'gasPrice': web3.toWei(opportunity.get('gas_price'), 'gwei')
+    }
+    tx_hash = web3.eth.send_transaction(drain_tx)
+    logger.log_info(f"Liquidity drain transaction executed: {tx_hash.hex()}")
 
-                # Safety and risk checks before executing trades
-                if safety_manager.is_safe_to_proceed(trade_data=action):
-                    if risk_manager.is_risk_compliant(market_data):
-                        trade_data = {
-                            "source_wallet": action.get("source_wallet"),
-                            "amount": action.get("amount"),
-                            "trade_type": "revenge_trade"
-                        }
-                        await self.execute_trade(trade_data)
-                    else:
-                        logger.log_warning("Risk thresholds exceeded. Skipping trade execution.")
-                else:
-                    logger.log_warning("Safety check failed. Aborting trade execution.")
+async def execute_revenge_attack(attacker_address):
+    """
+    Executes various MEV-based counter-attacks on a targeted address.
+    """
+    logger.log_info(f"Initiating revenge attack on {attacker_address}")
+    
+    # Step 1: Mempool scouting for attack opportunities
+    attack_type, opportunity = await mempool_scout.detect_vulnerable_tx(attacker_address)
+    
+    # Step 2: Execute MEV attack based on opportunity
+    if attack_type == "sandwich":
+        await place_counter_sandwich(attacker_address, opportunity)
+    elif attack_type == "front_run":
+        await place_front_run(attacker_address, opportunity)
+    elif attack_type == "back_run":
+        await place_back_run(attacker_address, opportunity)
+    elif attack_type == "liquidity_drain":
+        await place_liquidity_drain(attacker_address, opportunity)
+    else:
+        logger.log_warning(f"No profitable attack type detected for {attacker_address}")
+        return False
+    
+    logger.log_info(f"Revenge attack executed successfully on {attacker_address}")
+    return True
 
-                await asyncio.sleep(30)  # Adjust timing based on revenge trading conditions
-
-        except Exception as e:
-            logger.log_error(f"Error in Revenge Bot: {e}")
-            handle_errors(e)
-
-    def stop(self):
-        """Gracefully stop the bot."""
-        logger.log_info("Stopping Revenge Bot...")
-        self.running = False
+async def monitor_for_revenge_targets():
+    """
+    Continuously monitors the Red List for attackers and executes revenge attacks when opportunities arise.
+    """
+    while True:
+        red_list = await fetch_red_list()  # Fetch attackers from DB
+        for attacker in red_list:
+            if await profit_optimizer.is_profitable(attacker):
+                await execute_revenge_attack(attacker)
+        await asyncio.sleep(10)  # Re-run every 10 seconds
 
 if __name__ == "__main__":
-    bot = RevengeBot()
-    asyncio.run(bot.run())
+    asyncio.run(monitor_for_revenge_targets())
