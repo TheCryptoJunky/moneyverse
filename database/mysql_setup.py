@@ -1,22 +1,29 @@
-# File: /src/database/mysql_setup.py
+# Full file path: /moneyverse/database/mysql_setup.py
 
-import subprocess
-import mysql.connector
-from mysql.connector import Error # type: ignore
-import all_logging.centralized_logger
-import logging
 import os
+import subprocess
+import logging
+import mysql.connector
+from mysql.connector import Error
 from dotenv import load_dotenv, find_dotenv
 
 # Load environment variables
 dotenv_path = find_dotenv()
 if not dotenv_path:
-    logging.warning(".env file not found. Make sure environment variables are set.")
+    logging.warning(".env file not found. Ensure environment variables are set.")
 else:
     load_dotenv(dotenv_path)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
+
+# Database connection configuration from environment variables
+DB_CONFIG = {
+    "host": os.getenv("MYSQL_HOST"),
+    "user": os.getenv("MYSQL_USER"),
+    "password": os.getenv("MYSQL_PASSWORD"),
+    "database": os.getenv("MYSQL_DATABASE")
+}
 
 def install_mysql():
     """
@@ -37,46 +44,40 @@ def install_mysql():
 
 def connect_to_db():
     """
-    Connect to MySQL using credentials from the environment variables.
+    Connect to MySQL using environment credentials.
     """
     try:
-        conn = mysql.connector.connect(
-            host=os.getenv('MYSQL_HOST'),
-            user=os.getenv('MYSQL_USER'),
-            password=os.getenv('MYSQL_PASSWORD'),
-            database=os.getenv('MYSQL_DATABASE')
-        )
+        conn = mysql.connector.connect(**DB_CONFIG)
         logging.info("Successfully connected to MySQL.")
-        return conn, conn.cursor()
+        return conn
     except Error as e:
         logging.error(f"Error connecting to MySQL: {e}")
         raise
 
 def create_user_and_database(cursor):
     """
-    Creates the MySQL user and database if they don't exist.
+    Creates MySQL user and database if they do not exist.
     """
     try:
-        user = os.getenv('MYSQL_USER')
-        password = os.getenv('MYSQL_PASSWORD')
-        database = os.getenv('MYSQL_DATABASE')
+        user = DB_CONFIG["user"]
+        password = DB_CONFIG["password"]
+        database = DB_CONFIG["database"]
 
         cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database};")
         cursor.execute(f"CREATE USER IF NOT EXISTS '{user}'@'localhost' IDENTIFIED BY '{password}';")
         cursor.execute(f"GRANT ALL PRIVILEGES ON {database}.* TO '{user}'@'localhost';")
         cursor.execute("FLUSH PRIVILEGES;")
-        logging.info(f"Database '{database}' and user '{user}' created successfully.")
+        logging.info(f"Database '{database}' and user '{user}' set up successfully.")
     except Error as e:
         logging.error(f"Error creating database or user: {e}")
         raise
 
 def create_tables(cursor):
     """
-    Creates the necessary tables for the trading bots, including logs, trades, and lists (whitelist, blacklist, etc.).
+    Creates necessary tables in the database if they do not exist.
     """
-    try:
-        # Create 'trades' table
-        cursor.execute("""
+    tables = {
+        "trades": """
             CREATE TABLE IF NOT EXISTS trades (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 symbol VARCHAR(10),
@@ -85,58 +86,43 @@ def create_tables(cursor):
                 price DECIMAL(18, 8),
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
-        logging.info("Table 'trades' created successfully.")
-
-        # Enhanced 'bot_logs' table for centralized logging
-        cursor.execute("""
+        """,
+        "bot_logs": """
             CREATE TABLE IF NOT EXISTS bot_logs (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 bot_name VARCHAR(255),
                 identifier VARCHAR(255),
                 log_type VARCHAR(50),
-                severity VARCHAR(10), -- Log level like INFO, WARNING, ERROR
+                severity VARCHAR(10),
                 message TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
-        logging.info("Table 'bot_logs' created successfully.")
-
-        # Create 'whitelist' table
-        cursor.execute("""
+        """,
+        "whitelist": """
             CREATE TABLE IF NOT EXISTS whitelist (
                 token_address VARCHAR(255) PRIMARY KEY,
                 added_by VARCHAR(50),
                 notes TEXT,
                 date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
-        logging.info("Table 'whitelist' created successfully.")
-
-        # Create 'blacklist' table
-        cursor.execute("""
+        """,
+        "blacklist": """
             CREATE TABLE IF NOT EXISTS blacklist (
                 token_address VARCHAR(255) PRIMARY KEY,
                 reason TEXT,
                 flagged_by VARCHAR(50),
                 date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
-        logging.info("Table 'blacklist' created successfully.")
-
-        # Create 'redlist' table (for aggressive targets)
-        cursor.execute("""
+        """,
+        "redlist": """
             CREATE TABLE IF NOT EXISTS redlist (
                 token_address VARCHAR(255) PRIMARY KEY,
                 reason TEXT,
                 flagged_by VARCHAR(50),
                 date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
-        logging.info("Table 'redlist' created successfully.")
-
-        # Create 'pumplist' table (for projects under temporary AI-driven assistance)
-        cursor.execute("""
+        """,
+        "pumplist": """
             CREATE TABLE IF NOT EXISTS pumplist (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 token_address VARCHAR(255),
@@ -144,56 +130,70 @@ def create_tables(cursor):
                 added_by VARCHAR(50),
                 date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
-        logging.info("Table 'pumplist' created successfully.")
-
-        # Create 'logs' table
-        cursor.execute("""CREATE TABLE logs (
+        """,
+        "performance_metrics": """
+            CREATE TABLE IF NOT EXISTS performance_metrics (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                log_type VARCHAR(50),
-                message TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                metric_name VARCHAR(255),
+                value FLOAT,
+                timestamp DATETIME
             );
-        """)
-        logging.info("table 'logs' created successfully.")
-
-        # Create transactions table
-        cursor.execute("""CREATE TABLE IF NOT EXISTS transactions (
+        """,
+        "transactions": """
+            CREATE TABLE IF NOT EXISTS transactions (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 wallet_id VARCHAR(255),
                 trade_type VARCHAR(255),
                 amount DECIMAL(20, 8),
                 status VARCHAR(50),
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        logging.info("table 'transactions' created successfully.")
-
-        # Create agents table
-        cursor.execute("""CREATE TABLE IF NOT EXISTS agents (
+            );
+        """,
+        "agents": """
+            CREATE TABLE IF NOT EXISTS agents (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 strategy_name VARCHAR(255),
                 status VARCHAR(50),
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        logging.info("table 'agents' created successfully.")
-          
-    except Error as e:
-        logging.error(f"Error creating tables: {e}")
-        raise
+            );
+        """
+    }
+    for name, ddl in tables.items():
+        cursor.execute(ddl)
+        logging.info(f"Table '{name}' created successfully.")
+
+def create_indexes(cursor):
+    """
+    Creates indexes for frequently queried fields to improve database performance.
+    """
+    indexes = {
+        "pumplist_entry_id": "CREATE INDEX IF NOT EXISTS idx_entry_id ON pumplist(token_address)",
+        "redlist_bad_actor": "CREATE INDEX IF NOT EXISTS idx_bad_actor ON redlist(token_address)"
+    }
+    for idx_name, ddl in indexes.items():
+        cursor.execute(ddl)
+        logging.info(f"Index '{idx_name}' created successfully.")
 
 def setup_database():
     """
-    Full setup process: Install MySQL, create database, user, and required tables.
+    Full setup process: Installs MySQL, creates database, user, tables, and indexes.
     """
-    install_mysql()
-    conn, cursor = connect_to_db()
-    create_user_and_database(cursor)
-    create_tables(cursor)
-    conn.commit()
-    cursor.close()
-    conn.close()
+    install_mysql()  # Install MySQL if needed
+    conn = connect_to_db()  # Connect to the database
+    cursor = conn.cursor()
+    
+    try:
+        create_user_and_database(cursor)  # Create database and user if they don't exist
+        create_tables(cursor)  # Create tables
+        create_indexes(cursor)  # Create indexes
+        conn.commit()
+        logging.info("MySQL database setup completed successfully.")
+    except Error as e:
+        logging.error(f"Error during database setup: {e}")
+        conn.rollback()
+    finally:
+        cursor.close()
+        conn.close()
 
 if __name__ == "__main__":
     setup_database()
