@@ -1,128 +1,101 @@
 # Full file path: /moneyverse/strategies/market_maker_bot.py
 
+import time
+import numpy as np
 import asyncio
-from ai.agents.rl_agent import RLTradingAgent
-from centralized_logger import CentralizedLogger
-from src.managers.transaction_manager import TransactionManager
-from src.managers.risk_manager import RiskManager
-from market_data import MarketDataAPI
-from src.safety.safety_manager import SafetyManager
-from src.utils.error_handler import handle_errors
-from ai.rl_algorithms import DDPGAgent, PPOAgent, LSTM_MemoryAgent, MARLAgent
-
-# Initialize components
-logger = CentralizedLogger()
-transaction_manager = TransactionManager()
-risk_manager = RiskManager()
-safety_manager = SafetyManager()
-market_data_api = MarketDataAPI()
-
-# Initialize multiple RL agents for dynamic selection, including memory-based LSTM
-ddpg_agent = DDPGAgent(environment="market_maker")
-ppo_agent = PPOAgent(environment="market_maker")
-lstm_agent = LSTM_MemoryAgent(environment="market_maker")
-marl_agent = MARLAgent(environment="market_maker")
-
-# Track performance for each agent
-agent_performance = {"DDPG": 0, "PPO": 0, "LSTM": 0, "MARL": 0}
+from exchange_interface import get_order_book, place_order, cancel_order
+from utils import sentiment_analysis, price_predictor  # AI-driven insights for strategy adjustments
+from database_manager import log_performance, reinvest_profits  # Logging and reinvestment
+from centralized_logger import CentralizedLogger  # Robust error tracking
+from statistics import mean
 
 class MarketMakerBot:
-    def __init__(self):
-        self.running = True
-        self.rl_agent = None
-        self.select_agent()  # Initialize with the best performing agent
+    def __init__(self, pair, spread=0.001, order_size=1.0, reinvest_percent=0.2, accumulation_wallet=None, risk_tolerance=0.7):
+        self.pair = pair
+        self.spread = spread
+        self.order_size = order_size
+        self.current_orders = []
+        self.reinvest_percent = reinvest_percent
+        self.accumulation_wallet = accumulation_wallet
+        self.risk_tolerance = risk_tolerance
+        self.profit_tracker = []
+        self.sentiment_threshold = 0.6  # Adjustable for sentiment-driven actions
+        self.logger = CentralizedLogger()
 
-    def select_agent(self):
-        """Select the best-performing agent based on recent trade performance."""
-        best_agent_name = max(agent_performance, key=agent_performance.get)
-        self.rl_agent = {
-            "DDPG": ddpg_agent,
-            "PPO": ppo_agent,
-            "LSTM": lstm_agent,
-            "MARL": marl_agent,
-        }[best_agent_name]
-        logger.log_info(f"Selected agent: {best_agent_name}")
+    def analyze_market(self):
+        """Fetches and returns the best bid and ask prices for market making."""
+        order_book = get_order_book(self.pair)
+        best_bid = order_book['bids'][0]
+        best_ask = order_book['asks'][0]
+        return best_bid, best_ask
 
-    async def fetch_market_data(self):
-        """Fetch market data specifically for market making strategies."""
-        try:
-            market_data = await market_data_api.get_market_data()
-            logger.log_info(f"Fetched market data: {market_data}")
-            return market_data
-        except Exception as e:
-            logger.log_error(f"Failed to fetch market data: {e}")
-            handle_errors(e)
-            return None
+    def adjust_strategy(self):
+        """Adjusts spread and order size based on AI-driven sentiment and price prediction."""
+        sentiment_score = sentiment_analysis(self.pair)
+        price_prediction = price_predictor.predict_price_movement(self.pair)
 
-    def ai_decision(self, market_data):
-        """Make an AI-driven trading decision using the selected RL agent."""
-        try:
-            action = self.rl_agent.decide_action(market_data)
-            logger.log_info(f"AI decision by {self.rl_agent.__class__.__name__}: {action}")
-            return action
-        except Exception as e:
-            logger.log_error(f"Error in AI decision-making: {e}")
-            handle_errors(e)
-            return None
-
-    async def execute_trade(self, trade_data):
-        """Execute the trade and update agent performance based on success or failure."""
-        trade_success = await transaction_manager.execute_trade(trade_data)
-        agent_type = self.rl_agent.__class__.__name__
-
-        if trade_success:
-            logger.log_info(f"Trade executed successfully: {trade_data}")
-            agent_performance[agent_type] += 1  # Reward successful trade
+        # Adjust spread and order size based on sentiment and performance feedback
+        if sentiment_score > self.sentiment_threshold:
+            self.spread *= 0.8  # Narrow spread on positive sentiment
         else:
-            logger.log_warning(f"Trade failed: {trade_data}")
-            agent_performance[agent_type] -= 1  # Penalize failed trade
+            self.spread *= 1.2  # Widen spread on negative sentiment
 
-    async def run(self):
-        """Main loop to operate the market maker bot with dynamic agent switching."""
-        logger.log_info("Starting Market Maker Bot with dynamic agent selection...")
-        try:
-            while self.running:
-                # Re-evaluate and select the best-performing agent if necessary
-                if max(agent_performance.values()) != agent_performance[self.rl_agent.__class__.__name__]:
-                    self.select_agent()
+        if price_prediction == 'up':
+            self.order_size *= 1.5  # Increase buy size on positive predictions
+        elif price_prediction == 'down':
+            self.order_size *= 0.7  # Decrease buy size on negative predictions
 
-                market_data = await self.fetch_market_data()
-                if market_data is None:
-                    logger.log_warning("No market data available; retrying in 60 seconds.")
-                    await asyncio.sleep(60)
-                    continue
+        self.logger.log_info(f"Adjusted strategy: Spread - {self.spread}, Order Size - {self.order_size}")
 
-                action = self.ai_decision(market_data)
-                if action is None:
-                    logger.log_warning("AI decision failed; retrying in 60 seconds.")
-                    await asyncio.sleep(60)
-                    continue
+    def adjust_orders(self):
+        """Places buy and sell orders based on adjusted market data and spread."""
+        best_bid, best_ask = self.analyze_market()
+        target_bid = best_bid * (1 - self.spread)
+        target_ask = best_ask * (1 + self.spread)
 
-                # Safety and risk checks before executing trades
-                if safety_manager.is_safe_to_proceed(trade_data=action):
-                    if risk_manager.is_risk_compliant(market_data):
-                        trade_data = {
-                            "source_wallet": action.get("source_wallet"),
-                            "amount": action.get("amount"),
-                            "trade_type": "market_maker"
-                        }
-                        await self.execute_trade(trade_data)
-                    else:
-                        logger.log_warning("Risk thresholds exceeded. Skipping trade execution.")
-                else:
-                    logger.log_warning("Safety check failed. Aborting trade execution.")
+        self.cancel_current_orders()
+        self.place_order('buy', target_bid, self.order_size)
+        self.place_order('sell', target_ask, self.order_size)
 
-                await asyncio.sleep(60)  # Delay for next market-making cycle
+    def place_order(self, side, price, size):
+        """Places an order and logs it for performance tracking."""
+        order_id = place_order(self.pair, side, price, size)
+        self.current_orders.append(order_id)
+        self.logger.log_info(f"Placed {side} order: Price - {price}, Size - {size}")
 
-        except Exception as e:
-            logger.log_error(f"Critical error in Market Maker Bot: {e}")
-            handle_errors(e)
+    def cancel_current_orders(self):
+        """Cancels all current orders to prepare for new adjustments."""
+        for order_id in self.current_orders:
+            cancel_order(order_id)
+        self.current_orders.clear()
 
-    def stop(self):
-        """Stops the market maker bot."""
-        logger.log_info("Stopping Market Maker Bot...")
-        self.running = False
+    def reinvest_profits(self):
+        """Reinvests a portion of profits into the accumulation wallet or adjusts based on GUI settings."""
+        if self.profit_tracker:
+            recent_profit = mean(self.profit_tracker[-5:])
+            reinvest_amount = recent_profit * self.reinvest_percent
 
-if __name__ == "__main__":
-    bot = MarketMakerBot()
-    asyncio.run(bot.run())
+            # Accumulate tokens in specified wallet
+            if self.accumulation_wallet:
+                place_order(self.pair, 'buy', reinvest_amount, wallet=self.accumulation_wallet)
+            else:
+                place_order(self.pair, 'buy', reinvest_amount)  # Default wallet if none specified
+
+            # Log the reinvestment activity
+            log_performance(self.pair, reinvest_amount, "Reinvestment")
+
+            # Reset profit tracker periodically
+            self.profit_tracker.clear()
+
+    async def run(self, interval=60):
+        """Main bot loop with dynamic agent adjustments and GUI-linked error control."""
+        self.logger.log_info("Market Maker Bot initiated...")
+        while True:
+            try:
+                self.adjust_strategy()  # Dynamic adjustments
+                self.adjust_orders()  # Place and manage orders
+                await asyncio.sleep(interval)  # Delay for next cycle
+                self.reinvest_profits()  # Periodic reinvestment
+            except Exception as e:
+                self.logger.log_error(f"Error in Market Maker Bot loop: {e}")
+                await asyncio.sleep(60)  # Pause before retrying in case of error
