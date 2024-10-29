@@ -11,7 +11,7 @@ from database.async_db_handler import AsyncDBHandler
 from datetime import datetime, timedelta
 from market_data import MarketDataAPI
 
-# Centralized logging setup
+# Initialize centralized logging
 logger = CentralizedLogger()
 
 class SelfLearningEngine:
@@ -21,7 +21,7 @@ class SelfLearningEngine:
     """
 
     def __init__(self, db_handler: AsyncDBHandler, reinvestment_interval=3600):
-        # Initialize core AI and utility components
+        # Core AI and utility components
         self.db_handler = db_handler
         self.rl_agent = RLTradingAgent(environment="nav_optimization", model="PPO")
         self.manager_agent = ManagerAgent(nav_target_multiplier=2.0)
@@ -32,11 +32,11 @@ class SelfLearningEngine:
         self.start_time = datetime.now()
         self.end_time = self.start_time + timedelta(hours=1)
         self.profit_wallet = "non_swarm_wallet"
-        self.configs = {}  # To hold dynamic configurations
+        self.configs = {}
 
     async def update_configuration(self):
         """
-        Fetches updated configuration settings from the database for adaptive strategy.
+        Fetches updated configuration settings from the database for adaptive strategy adjustments.
         """
         configs = await self.db_handler.fetch("SELECT config_key, config_value FROM configurations")
         self.configs = {config["config_key"]: config["config_value"] for config in configs}
@@ -47,10 +47,10 @@ class SelfLearningEngine:
         """
         while True:
             try:
-                await self.update_configuration()  # Reload configuration dynamically
+                await self.update_configuration()  # Load updated configurations dynamically
                 best_api = self.source_selector.choose_best_source()
                 market_data = await self.source_selector.call_api(best_api)
-                if market_data is None:
+                if not market_data:
                     logger.log("warning", "Market data fetch failed, using fallback.")
                     continue
 
@@ -110,9 +110,8 @@ class SelfLearningEngine:
             await asyncio.sleep(5)  # Check every 5 seconds
 
     def calculate_nav(self):
-        """Calculates the current NAV for monitoring."""
-        # Placeholder for actual NAV calculation logic
-        return 10000  # Example NAV
+        """Placeholder method for NAV calculation. Returns a simulated NAV value."""
+        return 10000  # Example NAV value
 
     async def run_engine(self):
         """
