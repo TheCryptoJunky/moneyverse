@@ -1,79 +1,93 @@
-# Full file path: /moneyverse/flask_gui/app.py
+# Full file path: moneyverse/flask_gui/app.py
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template, redirect, url_for, flash
 from managers.configuration_manager import ConfigurationManager
-import pyotp
-import matplotlib.pyplot as plt
-from cryptography.fernet import Fernet
-from io import BytesIO
-import base64
 from managers.wallet_manager import WalletManager
+from database.security_manager import SecurityManager, UserAuthManager
+from database.async_db_handler import AsyncDBHandler
+from utils.mempool_analysis import MempoolAnalysis
+from io import BytesIO
 from datetime import datetime
-import json
+import matplotlib.pyplot as plt
+import base64
+import asyncio
 
+# Initialize Flask app and utility objects
 app = Flask(__name__)
 wallet_manager = WalletManager()
 config_manager = ConfigurationManager()
+security_manager = SecurityManager()
+auth_manager = UserAuthManager()
+db_handler = AsyncDBHandler()
+mempool_analysis = MempoolAnalysis(web3_provider="YOUR_WEB3_PROVIDER_URL")
 
-
-# Load or generate encryption key (store securely in production)
-encryption_key = Fernet.generate_key()
-cipher = Fernet(encryption_key)
-
-# OTP for secure access (configure with user-specific secret for production)
-otp_secret = pyotp.random_base32()
-totp = pyotp.TOTP(otp_secret)
-
-# Transaction stats storage
+# Centralized encryption and logging setup
+encryption_key = security_manager.encryption_key
+cipher = security_manager.cipher
 transaction_stats = {
     "most_expensive": {"time": None, "aggregator": None, "cost": 0},
     "least_expensive": {"time": None, "aggregator": None, "cost": float('inf')}
 }
 
+# --- 2FA Setup ---
+@app.route('/setup_2fa', methods=['GET', 'POST'])
+def setup_2fa():
+    """Sets up 2FA for user authentication with QR code."""
+    if request.method == 'POST':
+        user_identifier = request.form['username']
+        auth_manager.setup_2fa(user_identifier)
+        flash("2FA setup complete. Scan the QR code in your authenticator app.")
+    return render_template('setup_2fa.html')
+
+@app.route('/validate_2fa', methods=['POST'])
+def validate_2fa():
+    """Validates the 2FA token to authorize user actions."""
+    token = request.form['token']
+    if auth_manager.verify_2fa(token):
+        return redirect(url_for('wallet_management'))
+    else:
+        flash("Invalid 2FA token. Please try again.")
+        return redirect(url_for('setup_2fa'))
+
 # --- Configuration Endpoints ---
+@app.route("/config/<key>", methods=["GET", "POST", "DELETE"])
+def config_operations(key):
+    """Handles getting, setting, and deleting configuration values."""
+    if request.method == "GET":
+        value = config_manager.get_config(key)
+        if value is None:
+            return jsonify({"error": f"Configuration for {key} not found"}), 404
+        return jsonify({key: value})
 
-@app.route("/config/<key>", methods=["GET"])
-def get_configuration(key):
-    """Retrieve a configuration value by key."""
-    value = config_manager.get_config(key)
-    if value is None:
-        return jsonify({"error": f"Configuration for {key} not found"}), 404
-    return jsonify({key: value})
+    elif request.method == "POST":
+        data = request.json
+        value = data.get("value")
+        if value is None:
+            return jsonify({"error": "Missing configuration value"}), 400
+        config_manager.set_config(key, value)
+        return jsonify({"status": f"Configuration for {key} set to {value}."})
 
-@app.route("/config/<key>", methods=["POST"])
-def set_configuration(key):
-    """Set a configuration value by key."""
-    data = request.json
-    value = data.get("value")
-    if value is None:
-        return jsonify({"error": "Missing configuration value"}), 400
-    config_manager.set_config(key, value)
-    return jsonify({"status": f"Configuration for {key} set to {value}."})
+    elif request.method == "DELETE":
+        config_manager.delete_config(key)
+        return jsonify({"status": f"Configuration for {key} deleted."})
 
-@app.route("/config/<key>", methods=["DELETE"])
-def delete_configuration(key):
-    """Delete a configuration by key."""
-    config_manager.delete_config(key)
-    return jsonify({"status": f"Configuration for {key} deleted."})
-
-# --- Enhanced Wallet Profile Endpoints ---
-
+# --- Wallet Profile and Management Endpoints ---
 @app.route("/wallets/<wallet_id>/profile", methods=["GET"])
-def wallet_profile(wallet_id):
-    """Retrieve the full profile for a specific wallet, including sensitive details."""
-    wallet = next((w for w in wallet_manager.wallets if w["wallet_id"] == wallet_id), None)
+async def wallet_profile(wallet_id):
+    """Retrieve the full profile for a specific wallet with encrypted data."""
+    wallet = await db_handler.fetch("SELECT * FROM wallets WHERE wallet_id = $1", wallet_id)
     if not wallet:
         return jsonify({"error": "Wallet not found"}), 404
 
-    # Mock wallet profile data (extend this with real data sources as needed)
+    wallet_data = wallet[0]  # Assuming single result for unique wallet_id
     wallet_profile = {
-        "wallet_id": wallet["wallet_id"],
-        "created_date": "2024-01-15",
-        "entry_type": "swarm-born" if wallet["wallet_id"].startswith("sw") else "adopted",
-        "entry_date": "2024-01-20",
-        "initial_assets": 5000,
+        "wallet_id": wallet_data['wallet_id'],
+        "created_date": wallet_data['creation_date'].strftime('%Y-%m-%d'),
+        "entry_type": "swarm-born" if wallet_data['wallet_id'].startswith("sw") else "adopted",
+        "entry_date": wallet_data['creation_date'].strftime('%Y-%m-%d'),
+        "initial_assets": wallet_data['balance'],
         "performance": {
-            "overall_gain": 1200,  # example
+            "overall_gain": 1200,  # Example gain
             "successful_strategies": ["Arbitrage", "Market Making"],
             "mev_techniques": {
                 "sandwich": 30,
@@ -87,53 +101,83 @@ def wallet_profile(wallet_id):
             "DAI": 50
         }
     }
-
     return jsonify(wallet_profile)
 
 @app.route("/wallets/<wallet_id>/details", methods=["GET"])
-def wallet_details(wallet_id):
-    """Show detailed wallet info, including encrypted recovery phrase, secured by OTP."""
+async def wallet_details(wallet_id):
+    """Displays detailed wallet info, including decrypted recovery phrase with 2FA validation."""
     otp_token = request.args.get("otp_token")
-    if not totp.verify(otp_token):
+    if not auth_manager.verify_2fa(otp_token):
         return jsonify({"error": "Invalid or missing OTP token"}), 403
 
-    wallet = next((w for w in wallet_manager.wallets if w["wallet_id"] == wallet_id), None)
+    wallet = await db_handler.fetch("SELECT * FROM wallets WHERE wallet_id = $1", wallet_id)
     if not wallet:
         return jsonify({"error": "Wallet not found"}), 404
 
-    # Decrypt and show recovery phrase securely
-    encrypted_phrase = wallet.get("recovery_phrase", None)
-    if encrypted_phrase:
-        decrypted_phrase = cipher.decrypt(encrypted_phrase).decode()
-    else:
-        decrypted_phrase = "Recovery phrase not available."
+    # Decrypt sensitive recovery phrase
+    encrypted_phrase = wallet[0].get("encrypted_seed_phrase", None)
+    decrypted_phrase = security_manager.decrypt_data(encrypted_phrase) if encrypted_phrase else "N/A"
 
     # Asset distribution pie chart
-    asset_distribution = wallet["asset_distribution"]
+    asset_distribution = wallet[0].get("asset_distribution", {})
     pie_img = generate_pie_chart(asset_distribution, title="Asset Distribution")
 
     details = {
         "wallet_id": wallet_id,
-        "address": wallet.get("address"),
+        "address": wallet[0].get("address"),
         "recovery_phrase": decrypted_phrase,
-        "assets": wallet["assets"],
+        "assets": wallet[0].get("assets"),
         "asset_distribution_chart": pie_img
     }
-
     return jsonify(details)
 
 @app.route("/wallets/<wallet_id>/deactivate", methods=["POST"])
-def deactivate_wallet(wallet_id):
-    """Deactivate a wallet from swarm activity, without deleting it."""
-    wallet = next((w for w in wallet_manager.wallets if w["wallet_id"] == wallet_id), None)
-    if not wallet:
-        return jsonify({"error": "Wallet not found"}), 404
-
-    wallet["status"] = "inactive"
+async def deactivate_wallet(wallet_id):
+    """Deactivates a wallet from swarm activity without deletion."""
+    await db_handler.execute("UPDATE wallets SET status = $1 WHERE wallet_id = $2", "inactive", wallet_id)
     return jsonify({"status": f"Wallet {wallet_id} deactivated from swarm activity."})
 
-# --- Utility Functions ---
+@app.route("/wallets/<wallet_id>/secure_recovery_phrase", methods=["POST"])
+async def secure_recovery_phrase(wallet_id):
+    """Encrypts and securely stores the recovery phrase for a wallet."""
+    data = request.json
+    recovery_phrase = data.get("recovery_phrase")
+    if not recovery_phrase:
+        return jsonify({"error": "Recovery phrase is required."}), 400
 
+    encrypted_phrase = security_manager.encrypt_data(recovery_phrase)
+    await db_handler.execute(
+        "UPDATE wallets SET encrypted_seed_phrase = $1 WHERE wallet_id = $2", encrypted_phrase, wallet_id
+    )
+    return jsonify({"status": f"Recovery phrase for wallet {wallet_id} securely stored."})
+
+# --- Mempool Analysis: Data Collection and Export Endpoints ---
+@app.route("/toggle_data_collection", methods=["POST"])
+def toggle_data_collection():
+    """
+    Toggle data collection mode and set interval type and value for analysis.
+    """
+    data = request.json
+    collect_mode = data.get("collect_mode", False)
+    interval_type = data.get("interval_type", "time")  # 'time' or 'blocks'
+    interval_value = data.get("interval_value", 60)  # Interval in seconds or block count
+    
+    asyncio.create_task(mempool_analysis.run_analysis_loop(collect_mode, interval_type, interval_value))
+    return jsonify({"status": "Data collection toggled.", "collect_mode": collect_mode})
+
+@app.route("/export_data", methods=["POST"])
+def export_data():
+    """
+    Export historical mempool data within a time range to CSV.
+    """
+    data = request.json
+    start_time = data.get("start_time")
+    end_time = data.get("end_time")
+    
+    mempool_analysis.export_data(start_time, end_time)
+    return jsonify({"status": "Data export initiated", "start_time": start_time, "end_time": end_time})
+
+# Utility Function for Generating Pie Charts
 def generate_pie_chart(data, title="Chart"):
     """Generate a base64-encoded pie chart image from data."""
     fig, ax = plt.subplots()
@@ -149,24 +193,6 @@ def generate_pie_chart(data, title="Chart"):
     buffer.close()
     return pie_chart_base64
 
-@app.route("/wallets/<wallet_id>/secure_recovery_phrase", methods=["POST"])
-def secure_recovery_phrase(wallet_id):
-    """
-    Securely store and encrypt the recovery phrase for a wallet.
-    Expects JSON: {"recovery_phrase": "phrase"}
-    """
-    data = request.json
-    recovery_phrase = data.get("recovery_phrase")
-    if not recovery_phrase:
-        return jsonify({"error": "Recovery phrase is required."}), 400
-
-    encrypted_phrase = cipher.encrypt(recovery_phrase.encode())
-    wallet = next((w for w in wallet_manager.wallets if w["wallet_id"] == wallet_id), None)
-    if not wallet:
-        return jsonify({"error": "Wallet not found"}), 404
-
-    wallet["recovery_phrase"] = encrypted_phrase
-    return jsonify({"status": f"Recovery phrase for wallet {wallet_id} securely stored."})
-
 if __name__ == "__main__":
+    asyncio.run(db_handler.init_pool())  # Initialize async database pool
     app.run(port=5000)
