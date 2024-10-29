@@ -1,6 +1,7 @@
 -- Full file path: moneyverse/database/configurations_table.sql
 
-CREATE TABLE configurations (
+-- Configuration Table for System Settings
+CREATE TABLE IF NOT EXISTS configurations (
     id SERIAL PRIMARY KEY,
     config_key VARCHAR(100) UNIQUE NOT NULL,             -- Key name of the configuration
     config_value TEXT NOT NULL,                          -- Value associated with the configuration
@@ -12,38 +13,33 @@ CREATE TABLE configurations (
 );
 
 -- Example Insertions for Configurations Aligned with Recent Updates
-
--- Reinforcement Learning Decision Threshold
 INSERT INTO configurations (config_key, config_value, description, data_type, is_encrypted, updated_by)
 VALUES 
-('rl_decision_threshold', '0.7', 'Threshold for RL-based action confidence', 'float', FALSE, 'system');
+    -- Reinforcement Learning Decision Threshold
+    ('rl_decision_threshold', '0.7', 'Threshold for RL-based action confidence', 'float', FALSE, 'system'),
 
--- Reinvestment Interval (seconds)
-INSERT INTO configurations (config_key, config_value, description, data_type, is_encrypted, updated_by)
-VALUES 
-('reinvestment_interval', '3600', 'Interval for periodic profit reinvestment in seconds', 'integer', FALSE, 'system');
+    -- Reinvestment Interval (seconds)
+    ('reinvestment_interval', '3600', 'Interval for periodic profit reinvestment in seconds', 'integer', FALSE, 'system'),
 
--- Encryption Key for Sensitive Data
-INSERT INTO configurations (config_key, config_value, description, data_type, is_encrypted, updated_by)
-VALUES 
-('encryption_key', '<encryption_key_here>', 'Encryption key for sensitive wallet data', 'string', TRUE, 'admin');
+    -- Encryption Key for Sensitive Data
+    ('encryption_key', '<encryption_key_here>', 'Encryption key for sensitive wallet data', 'string', TRUE, 'admin'),
 
--- Flask GUI Settings
-INSERT INTO configurations (config_key, config_value, description, data_type, is_encrypted, updated_by)
-VALUES 
-('flask_gui_timeout', '30', 'Session timeout for Flask GUI in minutes', 'integer', FALSE, 'system');
+    -- Flask GUI Session Timeout
+    ('flask_gui_timeout', '30', 'Session timeout for Flask GUI in minutes', 'integer', FALSE, 'system'),
 
--- AI Model Selection (e.g., PPO for reinforcement learning)
-INSERT INTO configurations (config_key, config_value, description, data_type, is_encrypted, updated_by)
-VALUES 
-('ai_model', 'PPO', 'AI model to use for NAV optimization', 'string', FALSE, 'system');
+    -- AI Model Selection
+    ('ai_model', 'PPO', 'AI model to use for NAV optimization', 'string', FALSE, 'system'),
 
--- Aggregator Selection Criteria
-INSERT INTO configurations (config_key, config_value, description, data_type, is_encrypted, updated_by)
-VALUES 
-('aggregator_selection', 'cost-effective', 'Strategy for choosing asset aggregators', 'string', FALSE, 'system');
+    -- Aggregator Selection Criteria
+    ('aggregator_selection', 'cost-effective', 'Strategy for choosing asset aggregators', 'string', FALSE, 'system'),
 
--- Wallet Rebalance Threshold (USD)
-INSERT INTO configurations (config_key, config_value, description, data_type, is_encrypted, updated_by)
-VALUES 
-('rebalance_threshold', '5000', 'Threshold for triggering wallet rebalancing', 'float', FALSE, 'admin');
+    -- Wallet Rebalance Threshold (USD)
+    ('rebalance_threshold', '5000', 'Threshold for triggering wallet rebalancing', 'float', FALSE, 'admin')
+ON CONFLICT (config_key) DO NOTHING;  -- Avoid duplicate entries
+
+-- Communications Table for Notification Settings
+CREATE TABLE IF NOT EXISTS communications (
+    id SERIAL PRIMARY KEY,
+    type VARCHAR(50) NOT NULL,              -- e.g., "email", "sms", "telegram", "discord"
+    encrypted_value BYTEA NOT NULL          -- Encrypted contact info for each type
+);

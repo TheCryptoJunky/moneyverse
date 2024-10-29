@@ -6,11 +6,16 @@ from managers.wallet_manager import WalletManager
 from database.security_manager import SecurityManager, UserAuthManager
 from database.async_db_handler import AsyncDBHandler
 from utils.mempool_analysis import MempoolAnalysis
-from io import BytesIO
+from utils.nav_monitor import NAVMonitor
 from datetime import datetime
+from io import BytesIO
 import matplotlib.pyplot as plt
 import base64
 import asyncio
+import os
+import smtplib
+from twilio.rest import Client
+import requests
 
 # Initialize Flask app and utility objects
 app = Flask(__name__)
@@ -20,10 +25,9 @@ security_manager = SecurityManager()
 auth_manager = UserAuthManager()
 db_handler = AsyncDBHandler()
 mempool_analysis = MempoolAnalysis(web3_provider="YOUR_WEB3_PROVIDER_URL")
+nav_monitor = NAVMonitor(...)  # Initialize with necessary dependencies
 
 # Centralized encryption and logging setup
-encryption_key = security_manager.encryption_key
-cipher = security_manager.cipher
 transaction_stats = {
     "most_expensive": {"time": None, "aggregator": None, "cost": 0},
     "least_expensive": {"time": None, "aggregator": None, "cost": float('inf')}
@@ -55,18 +59,13 @@ def config_operations(key):
     """Handles getting, setting, and deleting configuration values."""
     if request.method == "GET":
         value = config_manager.get_config(key)
-        if value is None:
-            return jsonify({"error": f"Configuration for {key} not found"}), 404
-        return jsonify({key: value})
-
+        return jsonify({key: value}) if value else jsonify({"error": f"Configuration for {key} not found"}), 404
     elif request.method == "POST":
-        data = request.json
-        value = data.get("value")
+        value = request.json.get("value")
         if value is None:
             return jsonify({"error": "Missing configuration value"}), 400
         config_manager.set_config(key, value)
         return jsonify({"status": f"Configuration for {key} set to {value}."})
-
     elif request.method == "DELETE":
         config_manager.delete_config(key)
         return jsonify({"status": f"Configuration for {key} deleted."})
@@ -89,17 +88,9 @@ async def wallet_profile(wallet_id):
         "performance": {
             "overall_gain": 1200,  # Example gain
             "successful_strategies": ["Arbitrage", "Market Making"],
-            "mev_techniques": {
-                "sandwich": 30,
-                "backrunning": 50,
-                "arbitrage": 20
-            }
+            "mev_techniques": {"sandwich": 30, "backrunning": 50, "arbitrage": 20}
         },
-        "asset_distribution": {
-            "USDC": 300,
-            "ETH": 150,
-            "DAI": 50
-        }
+        "asset_distribution": {"USDC": 300, "ETH": 150, "DAI": 50}
     }
     return jsonify(wallet_profile)
 
@@ -117,8 +108,6 @@ async def wallet_details(wallet_id):
     # Decrypt sensitive recovery phrase
     encrypted_phrase = wallet[0].get("encrypted_seed_phrase", None)
     decrypted_phrase = security_manager.decrypt_data(encrypted_phrase) if encrypted_phrase else "N/A"
-
-    # Asset distribution pie chart
     asset_distribution = wallet[0].get("asset_distribution", {})
     pie_img = generate_pie_chart(asset_distribution, title="Asset Distribution")
 
@@ -140,59 +129,45 @@ async def deactivate_wallet(wallet_id):
 @app.route("/wallets/<wallet_id>/secure_recovery_phrase", methods=["POST"])
 async def secure_recovery_phrase(wallet_id):
     """Encrypts and securely stores the recovery phrase for a wallet."""
-    data = request.json
-    recovery_phrase = data.get("recovery_phrase")
+    recovery_phrase = request.json.get("recovery_phrase")
     if not recovery_phrase:
         return jsonify({"error": "Recovery phrase is required."}), 400
 
     encrypted_phrase = security_manager.encrypt_data(recovery_phrase)
-    await db_handler.execute(
-        "UPDATE wallets SET encrypted_seed_phrase = $1 WHERE wallet_id = $2", encrypted_phrase, wallet_id
-    )
+    await db_handler.execute("UPDATE wallets SET encrypted_seed_phrase = $1 WHERE wallet_id = $2", encrypted_phrase, wallet_id)
     return jsonify({"status": f"Recovery phrase for wallet {wallet_id} securely stored."})
 
 # --- Mempool Analysis: Data Collection and Export Endpoints ---
 @app.route("/toggle_data_collection", methods=["POST"])
 def toggle_data_collection():
-    """
-    Toggle data collection mode and set interval type and value for analysis.
-    """
+    """Toggle data collection mode and set interval type and value for analysis."""
     data = request.json
     collect_mode = data.get("collect_mode", False)
-    interval_type = data.get("interval_type", "time")  # 'time' or 'blocks'
-    interval_value = data.get("interval_value", 60)  # Interval in seconds or block count
+    interval_type = data.get("interval_type", "time")
+    interval_value = data.get("interval_value", 60)
     
     asyncio.create_task(mempool_analysis.run_analysis_loop(collect_mode, interval_type, interval_value))
     return jsonify({"status": "Data collection toggled.", "collect_mode": collect_mode})
 
 @app.route("/export_data", methods=["POST"])
 def export_data():
-    """
-    Export historical mempool data within a time range to CSV.
-    """
+    """Export historical mempool data within a time range to CSV."""
     data = request.json
-    start_time = data.get("start_time")
-    end_time = data.get("end_time")
-    
-    mempool_analysis.export_data(start_time, end_time)
-    return jsonify({"status": "Data export initiated", "start_time": start_time, "end_time": end_time})
+    mempool_analysis.export_data(data.get("start_time"), data.get("end_time"))
+    return jsonify({"status": "Data export initiated"})
 
-# Utility Function for Generating Pie Charts
+# Utility for Generating Pie Charts
 def generate_pie_chart(data, title="Chart"):
     """Generate a base64-encoded pie chart image from data."""
     fig, ax = plt.subplots()
-    labels = list(data.keys())
-    sizes = list(data.values())
-    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
+    ax.pie(list(data.values()), labels=list(data.keys()), autopct='%1.1f%%', startangle=90)
     ax.axis("equal")
     plt.title(title)
     buffer = BytesIO()
     plt.savefig(buffer, format="png")
     buffer.seek(0)
-    pie_chart_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-    buffer.close()
-    return pie_chart_base64
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 if __name__ == "__main__":
-    asyncio.run(db_handler.init_pool())  # Initialize async database pool
+    asyncio.run(db_handler.init_pool())
     app.run(port=5000)
