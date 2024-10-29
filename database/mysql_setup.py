@@ -3,12 +3,17 @@
 import subprocess
 import mysql.connector
 from mysql.connector import Error # type: ignore
-import all_logging
+import all_logging.centralized_logger
+import logging
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
 # Load environment variables
-load_dotenv()
+dotenv_path = find_dotenv()
+if not dotenv_path:
+    logging.warning(".env file not found. Make sure environment variables are set.")
+else:
+    load_dotenv(dotenv_path)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -149,29 +154,29 @@ def create_tables(cursor):
                 message TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-                       """)
+        """)
         logging.info("table 'logs' created successfully.")
 
-         # Create transactions table
+        # Create transactions table
         cursor.execute("""CREATE TABLE IF NOT EXISTS transactions (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    wallet_id VARCHAR(255),
-                    trade_type VARCHAR(255),
-                    amount DECIMAL(20, 8),
-                    status VARCHAR(50),
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                wallet_id VARCHAR(255),
+                trade_type VARCHAR(255),
+                amount DECIMAL(20, 8),
+                status VARCHAR(50),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         logging.info("table 'transactions' created successfully.")
 
         # Create agents table
         cursor.execute("""CREATE TABLE IF NOT EXISTS agents (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    strategy_name VARCHAR(255),
-                    status VARCHAR(50),
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                strategy_name VARCHAR(255),
+                status VARCHAR(50),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         logging.info("table 'agents' created successfully.")
           
     except Error as e:

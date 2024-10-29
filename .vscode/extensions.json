@@ -1,0 +1,13 @@
+{
+    "recommendations": [
+        "rabinhansda.flask-builder",
+        "cstrap.flask-snippets",
+        "mikeshaker.python-essentials",
+        "codeyard.flask-snippets",
+        "thorcc.flask-vgs",
+        "waseemakram.jinja-snippets-flask",
+        "apedroed.happy-flasker",
+        "wyattferguson.jinja2-snippet-kit",
+        "rickywhite.python-template-snippets"
+    ]
+}

@@ -5,11 +5,6 @@
     ],
     "github.copilot.chat.search.semanticTextResults": true,
     "github.copilot.advanced": {},
-    "multicoder.enabledModels": [
-        "claude",
-        "gpt4o",
-        "deepseek"
-    ],
     "python.testing.unittestArgs": [
         "-v",
         "-s",
@@ -19,5 +14,15 @@
     ],
     "python.testing.pytestEnabled": false,
     "python.testing.unittestEnabled": true,
-    "tensorBoard.log": "debug"
+    "python.terminal.activateEnvironment": true,
+    "terminal.integrated.automationProfile.windows": null,
+    "terminal.integrated.defaultProfile.linux": "",
+        "terminal.integrated.env.windows": {
+            "PATH": "C:\\Users\\USERNAME\\AppData\\Local\\anaconda3\\Scripts\\;${env:PATH}"
+    },
+    "python.terminal.activateEnvInCurrentTerminal": true,
+    "accessibility.voice.keywordActivation": "chatInView",
+    "inlineChat.experimental.enableZoneToolbar": true,
+    "github.copilot.chat.experimental.inlineChatHint.enabled": true,
+    "github.copilot.chat.experimental.inlineChatCompletionTrigger.enabled": true
 }

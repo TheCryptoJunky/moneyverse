@@ -4,19 +4,20 @@ import asyncio
 import random
 import requests
 from datetime import datetime, timedelta
-from centralized_logger import CentralizedLogger
-from src.utils.error_handler import handle_errors
-from src.list_manager import ListManager
+from all_logging.centralized_logger import CentralizedLogger
+from utils.error_handler import handle_errors
+from managers.list_manager import ListManager
 from src.services.gas_price_service import GasPriceService
 from src.services.aggregator_service import AggregatorService
 from utils.retry_decorator import retry  # Import retry decorator
-
+from managers.configuration_manager import ConfigurationManager
 import mysql.connector
 
 logger = CentralizedLogger()
 list_manager = ListManager()
 gas_service = GasPriceService()
 aggregator_service = AggregatorService()
+config_manager = ConfigurationManager()
 
 class WalletManager:
     """
@@ -26,7 +27,8 @@ class WalletManager:
 
     def __init__(self):
         self.wallets = []
-        self.rebalance_threshold = 5000  # Threshold in USD to trigger rebalancing
+        # Load rebalancing threshold dynamically from the database
+        self.rebalance_threshold = float(config_manager.get_config("rebalance_threshold") or 5000)
 
     async def initialize_wallets(self):
         """
@@ -52,6 +54,8 @@ class WalletManager:
         """
         logger.log("info", "Starting AI-driven rebalancing.")
         for wallet in self.wallets:
+            # Reload rebalancing threshold from the database dynamically
+            self.rebalance_threshold = float(config_manager.get_config("rebalance_threshold") or 5000)
             if wallet["balance"] >= self.rebalance_threshold:
                 await self.perform_rebalance(wallet)
 

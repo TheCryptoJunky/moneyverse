@@ -1,6 +1,7 @@
 # Full file path: /moneyverse/flask_gui/app.py
 
-from flask import Flask, jsonify, request, abort
+from flask import Flask, jsonify, request
+from managers.configuration_manager import ConfigurationManager
 import pyotp
 import matplotlib.pyplot as plt
 from cryptography.fernet import Fernet
@@ -12,6 +13,8 @@ import json
 
 app = Flask(__name__)
 wallet_manager = WalletManager()
+config_manager = ConfigurationManager()
+
 
 # Load or generate encryption key (store securely in production)
 encryption_key = Fernet.generate_key()
@@ -26,6 +29,32 @@ transaction_stats = {
     "most_expensive": {"time": None, "aggregator": None, "cost": 0},
     "least_expensive": {"time": None, "aggregator": None, "cost": float('inf')}
 }
+
+# --- Configuration Endpoints ---
+
+@app.route("/config/<key>", methods=["GET"])
+def get_configuration(key):
+    """Retrieve a configuration value by key."""
+    value = config_manager.get_config(key)
+    if value is None:
+        return jsonify({"error": f"Configuration for {key} not found"}), 404
+    return jsonify({key: value})
+
+@app.route("/config/<key>", methods=["POST"])
+def set_configuration(key):
+    """Set a configuration value by key."""
+    data = request.json
+    value = data.get("value")
+    if value is None:
+        return jsonify({"error": "Missing configuration value"}), 400
+    config_manager.set_config(key, value)
+    return jsonify({"status": f"Configuration for {key} set to {value}."})
+
+@app.route("/config/<key>", methods=["DELETE"])
+def delete_configuration(key):
+    """Delete a configuration by key."""
+    config_manager.delete_config(key)
+    return jsonify({"status": f"Configuration for {key} deleted."})
 
 # --- Enhanced Wallet Profile Endpoints ---
 
