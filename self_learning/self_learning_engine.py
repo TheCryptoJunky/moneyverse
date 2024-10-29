@@ -1,14 +1,16 @@
 # Full file path: moneyverse/self_learning/self_learning_engine.py
 
 import asyncio
+from datetime import datetime, timedelta
 from ai.rl_agent import RLTradingAgent
 from rl_agent.manager_agent import ManagerAgent
+from rl_agent.worker_agent import WorkerAgent
+from rl_agent.meta_agent import MetaAgent
 from utils.source_selector import SourceSelector
 from utils.reward_calculator import calculate_reward
 from utils.nav_monitor import NAVMonitor
 from centralized_logger import CentralizedLogger
 from database.async_db_handler import AsyncDBHandler
-from datetime import datetime, timedelta
 from market_data import MarketDataAPI
 
 # Initialize centralized logging
@@ -16,7 +18,7 @@ logger = CentralizedLogger()
 
 class SelfLearningEngine:
     """
-    AI-driven Self-Learning Engine for dynamic asset management with a focus on NAV optimization.
+    Self-Learning Engine for dynamic asset management with NAV optimization.
     Integrates real-time performance tracking, alerts, and adaptive trading strategy selection.
     """
 
@@ -25,6 +27,8 @@ class SelfLearningEngine:
         self.db_handler = db_handler
         self.rl_agent = RLTradingAgent(environment="nav_optimization", model="PPO")
         self.manager_agent = ManagerAgent(nav_target_multiplier=2.0)
+        self.worker_agents = [WorkerAgent() for _ in range(3)]
+        self.meta_agent = MetaAgent(self.manager_agent, self.worker_agents)
         self.source_selector = SourceSelector(api_configs=db_handler.fetch("SELECT * FROM api_sources"))
         self.nav_monitor = NAVMonitor(self.rl_agent, db_handler, logger)
         self.market_data_api = MarketDataAPI()
@@ -35,16 +39,12 @@ class SelfLearningEngine:
         self.configs = {}
 
     async def update_configuration(self):
-        """
-        Fetches updated configuration settings from the database for adaptive strategy adjustments.
-        """
+        """Fetches updated configuration settings from the database for adaptive strategy adjustments."""
         configs = await self.db_handler.fetch("SELECT config_key, config_value FROM configurations")
         self.configs = {config["config_key"]: config["config_value"] for config in configs}
 
     async def optimize_nav(self):
-        """
-        Main loop for NAV optimization, leveraging RL-based decision-making and real-time adjustments.
-        """
+        """Main loop for NAV optimization, leveraging RL-based decision-making and real-time adjustments."""
         while True:
             try:
                 await self.update_configuration()  # Load updated configurations dynamically
@@ -59,7 +59,7 @@ class SelfLearningEngine:
                 self.manager_agent.manage_portfolio(current_nav)
 
                 # Each WorkerAgent executes trades to meet target NAV goals
-                for worker in self.manager_agent.worker_agents:
+                for worker in self.worker_agents:
                     worker.execute_trade(market_data)
 
                 # Predict NAV trend using RL agent
@@ -79,25 +79,20 @@ class SelfLearningEngine:
             await asyncio.sleep(10)  # Short delay before next cycle
 
     async def reinvestment_cycle(self):
-        """
-        Periodic reinvestment cycle based on profits and market condition updates.
-        """
+        """Periodic reinvestment cycle based on profits and market condition updates."""
         while True:
             try:
                 surplus = await self.nav_monitor.calculate_surplus()
                 if surplus > 0:
                     self.wallet_manager.transfer_to_wallet(self.profit_wallet, surplus)
                     logger.log("info", f"Transferred {surplus} to profit wallet.")
-
                 await asyncio.sleep(self.reinvestment_interval)
 
             except Exception as e:
                 logger.log("error", f"Error in reinvestment cycle: {str(e)}")
 
     async def monitor_nav_and_alert(self):
-        """
-        Monitors NAV and sends alerts if NAV trends indicate significant growth or drop.
-        """
+        """Monitors NAV and sends alerts if NAV trends indicate significant growth or drop."""
         while datetime.now() < self.end_time:
             status = self.nav_monitor.countdown_status()
             nav_trend = self.nav_monitor.get_nav_trend()
@@ -114,13 +109,12 @@ class SelfLearningEngine:
         return 10000  # Example NAV value
 
     async def run_engine(self):
-        """
-        Runs the full self-learning engine with all core functions in parallel.
-        """
+        """Runs the full self-learning engine with all core functions in parallel."""
         await asyncio.gather(
             self.optimize_nav(),
             self.reinvestment_cycle(),
-            self.monitor_nav_and_alert()
+            self.monitor_nav_and_alert(),
+            self.meta_agent.run_meta_learning()  # Meta-learning adjustment loop
         )
 
 # Run the self-learning engine
