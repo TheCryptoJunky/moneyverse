@@ -2,12 +2,14 @@
 
 import asyncio
 from ai.rl_agent import RLTradingAgent
+from rl_agent.manager_agent import ManagerAgent
 from utils.source_selector import SourceSelector
 from utils.reward_calculator import calculate_reward
 from utils.nav_monitor import NAVMonitor
 from centralized_logger import CentralizedLogger
 from database.async_db_handler import AsyncDBHandler
 from datetime import datetime, timedelta
+from market_data import MarketDataAPI
 
 # Centralized logging setup
 logger = CentralizedLogger()
@@ -22,12 +24,15 @@ class SelfLearningEngine:
         # Initialize core AI and utility components
         self.db_handler = db_handler
         self.rl_agent = RLTradingAgent(environment="nav_optimization", model="PPO")
+        self.manager_agent = ManagerAgent(nav_target_multiplier=2.0)
         self.source_selector = SourceSelector(api_configs=db_handler.fetch("SELECT * FROM api_sources"))
         self.nav_monitor = NAVMonitor(self.rl_agent, db_handler, logger)
+        self.market_data_api = MarketDataAPI()
         self.reinvestment_interval = reinvestment_interval
         self.start_time = datetime.now()
         self.end_time = self.start_time + timedelta(hours=1)
         self.profit_wallet = "non_swarm_wallet"
+        self.configs = {}  # To hold dynamic configurations
 
     async def update_configuration(self):
         """
@@ -43,21 +48,26 @@ class SelfLearningEngine:
         while True:
             try:
                 await self.update_configuration()  # Reload configuration dynamically
-
-                # Step 1: Fetch and assess market data
                 best_api = self.source_selector.choose_best_source()
                 market_data = await self.source_selector.call_api(best_api)
                 if market_data is None:
                     logger.log("warning", "Market data fetch failed, using fallback.")
                     continue
 
-                # Step 2: Predict NAV trend and decide next action
+                # ManagerAgent coordinates high-level NAV targets for WorkerAgents
+                current_nav = self.calculate_nav()
+                self.manager_agent.manage_portfolio(current_nav)
+
+                # Each WorkerAgent executes trades to meet target NAV goals
+                for worker in self.manager_agent.worker_agents:
+                    worker.execute_trade(market_data)
+
+                # Predict NAV trend using RL agent
                 nav_prediction = self.rl_agent.predict_nav_trend(market_data)
-                if nav_prediction < float(self.configs["rl_decision_threshold"]):
+                if nav_prediction < float(self.configs.get("rl_decision_threshold", 0.7)):
                     logger.log("warning", "RL decision threshold not met; skipping action.")
                     continue
 
-                # Step 3: Execute the AI-driven trading action
                 action = self.rl_agent.decide_action(market_data)
                 if action:
                     reward = calculate_reward(action)
@@ -74,7 +84,6 @@ class SelfLearningEngine:
         """
         while True:
             try:
-                # Calculate surplus and reinvest to reach target NAV
                 surplus = await self.nav_monitor.calculate_surplus()
                 if surplus > 0:
                     self.wallet_manager.transfer_to_wallet(self.profit_wallet, surplus)
@@ -93,13 +102,17 @@ class SelfLearningEngine:
             status = self.nav_monitor.countdown_status()
             nav_trend = self.nav_monitor.get_nav_trend()
 
-            # Send alerts based on trends
             if nav_trend["predicted_loss"] >= 0.2:
                 self.nav_monitor.send_notification("ALERT: Potential NAV drop exceeding 20% detected.")
-            elif nav_trend["predicted_surplus"] > float(self.configs["goal_multiplier"]) * 0.2:
+            elif nav_trend["predicted_surplus"] > float(self.configs.get("goal_multiplier", 2.0)) * 0.2:
                 self.nav_monitor.send_notification("SUCCESS: Projected NAV is on track to exceed goal by 20% surplus.")
 
             await asyncio.sleep(5)  # Check every 5 seconds
+
+    def calculate_nav(self):
+        """Calculates the current NAV for monitoring."""
+        # Placeholder for actual NAV calculation logic
+        return 10000  # Example NAV
 
     async def run_engine(self):
         """
