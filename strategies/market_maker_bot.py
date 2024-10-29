@@ -2,25 +2,21 @@
 
 import time
 import numpy as np
-import asyncio
 from exchange_interface import get_order_book, place_order, cancel_order
 from utils import sentiment_analysis, price_predictor  # AI-driven insights for strategy adjustments
-from database_manager import log_performance, reinvest_profits  # Logging and reinvestment
-from centralized_logger import CentralizedLogger  # Robust error tracking
+from database_manager import reinvest_profits  # Reinvestment handling
 from statistics import mean
 
 class MarketMakerBot:
-    def __init__(self, pair, spread=0.001, order_size=1.0, reinvest_percent=0.2, accumulation_wallet=None, risk_tolerance=0.7):
+    def __init__(self, pair, spread=0.001, order_size=1.0, reinvest_percent=0.2, accumulation_wallet=None):
         self.pair = pair
         self.spread = spread
         self.order_size = order_size
         self.current_orders = []
         self.reinvest_percent = reinvest_percent
         self.accumulation_wallet = accumulation_wallet
-        self.risk_tolerance = risk_tolerance
         self.profit_tracker = []
-        self.sentiment_threshold = 0.6  # Adjustable for sentiment-driven actions
-        self.logger = CentralizedLogger()
+        self.sentiment_threshold = 0.6  # Example threshold for sentiment-driven actions
 
     def analyze_market(self):
         """Fetches and returns the best bid and ask prices for market making."""
@@ -34,18 +30,17 @@ class MarketMakerBot:
         sentiment_score = sentiment_analysis(self.pair)
         price_prediction = price_predictor.predict_price_movement(self.pair)
 
-        # Adjust spread and order size based on sentiment and performance feedback
+        # Adjust spread based on sentiment
         if sentiment_score > self.sentiment_threshold:
             self.spread *= 0.8  # Narrow spread on positive sentiment
         else:
             self.spread *= 1.2  # Widen spread on negative sentiment
 
+        # Modify order size based on predicted movement
         if price_prediction == 'up':
             self.order_size *= 1.5  # Increase buy size on positive predictions
         elif price_prediction == 'down':
             self.order_size *= 0.7  # Decrease buy size on negative predictions
-
-        self.logger.log_info(f"Adjusted strategy: Spread - {self.spread}, Order Size - {self.order_size}")
 
     def adjust_orders(self):
         """Places buy and sell orders based on adjusted market data and spread."""
@@ -58,10 +53,9 @@ class MarketMakerBot:
         self.place_order('sell', target_ask, self.order_size)
 
     def place_order(self, side, price, size):
-        """Places an order and logs it for performance tracking."""
+        """Places an order and tracks its ID for management."""
         order_id = place_order(self.pair, side, price, size)
         self.current_orders.append(order_id)
-        self.logger.log_info(f"Placed {side} order: Price - {price}, Size - {size}")
 
     def cancel_current_orders(self):
         """Cancels all current orders to prepare for new adjustments."""
@@ -70,32 +64,24 @@ class MarketMakerBot:
         self.current_orders.clear()
 
     def reinvest_profits(self):
-        """Reinvests a portion of profits into the accumulation wallet or adjusts based on GUI settings."""
+        """Calculates recent profits and reinvests into designated accumulation wallet."""
         if self.profit_tracker:
-            recent_profit = mean(self.profit_tracker[-5:])
+            recent_profit = mean(self.profit_tracker[-5:])  # Track recent profit
             reinvest_amount = recent_profit * self.reinvest_percent
 
-            # Accumulate tokens in specified wallet
+            # Accumulate tokens in designated wallet if specified
             if self.accumulation_wallet:
                 place_order(self.pair, 'buy', reinvest_amount, wallet=self.accumulation_wallet)
             else:
-                place_order(self.pair, 'buy', reinvest_amount)  # Default wallet if none specified
+                place_order(self.pair, 'buy', reinvest_amount)  # Use default wallet if none specified
 
-            # Log the reinvestment activity
-            log_performance(self.pair, reinvest_amount, "Reinvestment")
-
-            # Reset profit tracker periodically
+            # Reset profit tracker periodically to clear history and refine recent performance
             self.profit_tracker.clear()
 
-    async def run(self, interval=60):
-        """Main bot loop with dynamic agent adjustments and GUI-linked error control."""
-        self.logger.log_info("Market Maker Bot initiated...")
+    def run(self, interval=60):
+        """Main bot loop to adjust strategy, place orders, and reinvest profits."""
         while True:
-            try:
-                self.adjust_strategy()  # Dynamic adjustments
-                self.adjust_orders()  # Place and manage orders
-                await asyncio.sleep(interval)  # Delay for next cycle
-                self.reinvest_profits()  # Periodic reinvestment
-            except Exception as e:
-                self.logger.log_error(f"Error in Market Maker Bot loop: {e}")
-                await asyncio.sleep(60)  # Pause before retrying in case of error
+            self.adjust_strategy()  # AI-driven adjustments
+            self.adjust_orders()
+            time.sleep(interval)  # Delay for next market-making cycle
+            self.reinvest_profits()  # Reinvest periodically to support liquidity pool
