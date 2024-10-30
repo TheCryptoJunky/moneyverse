@@ -21,6 +21,9 @@ from strategies.revenge_bot import RevengeBot
 from strategies.sniper_bot import SniperBot
 from strategies.statistical_arbitrage_bot import StatisticalArbitrageBot
 from strategies.triangle_arbitrage import TriangleArbitrageBot
+from .dqn import DQNAgent
+from .pgm import PGMModel
+from .actor_critic import ActorCriticAgent
 
 __all__ = [
     "ArbitrageBot",
@@ -43,4 +46,7 @@ __all__ = [
     "SniperBot",
     "StatisticalArbitrageBot",
     "TriangleArbitrageBot",
+    "DQNAgent",
+    "PGMModel",
+    "ActorCriticAgent",
 ]
