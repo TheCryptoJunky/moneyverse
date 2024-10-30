@@ -25,12 +25,12 @@ setup(
         "tensorflow>=2.0",
         "pandas",
         "ccxt",  # For exchange integration
-        "python-dotenv",  # For environment variable management
+        "python-dotenv",  # Environment variable management
         "flask",  # Flask GUI for bot management
         "gym",  # Reinforcement learning environments
         "numpy",
-        # Include other dependencies as necessary
+        # Additional dependencies can be added here as needed
     ],
-    scripts=["src/database/mysql_setup.py"],  # Ensures the setup script is included
+    scripts=["src/database/mysql_setup.py"],  # Ensure the setup script is included
     include_package_data=True,
 )
