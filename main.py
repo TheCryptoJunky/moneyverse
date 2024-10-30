@@ -1,8 +1,7 @@
-# Full file path: /moneyverse/main.py
-
 import asyncio
 from strategies.mev_strategy import MEV_STRATEGIES
-from src.managers.wallet_swarm import WalletSwarm
+from managers.wallet_swarm import WalletSwarm
+from utils.error_handler import log_error
 
 # Initialize WalletSwarm or any other required components
 wallet_swarm = WalletSwarm()
@@ -22,11 +21,16 @@ class StrategyExecutor:
 
     async def execute_strategy(self, market_data):
         """Execute the loaded strategy by identifying opportunities and executing trades."""
-        opportunities = self.strategy.identify_opportunities(market_data)
-        if opportunities:
-            for opportunity in opportunities:
-                profit = self.strategy.execute(opportunity)
-                print(f"Executed trade with expected profit: {profit}")
+        try:
+            opportunities = self.strategy.identify_opportunities(market_data)
+            if opportunities:
+                for opportunity in opportunities:
+                    profit = self.strategy.execute(opportunity)
+                    print(f"Executed trade with expected profit: {profit}")
+            else:
+                print("No profitable opportunities identified.")
+        except Exception as e:
+            log_error(f"Error executing strategy {self.strategy_name}: {e}")
 
 async def main():
     # Example: Choose strategy based on input or config
@@ -44,7 +48,9 @@ async def main():
         # Run the selected strategy
         await strategy_executor.execute_strategy(market_data)
     except ValueError as e:
-        print(e)
+        log_error(f"Invalid strategy selection: {e}")
+    except Exception as e:
+        log_error(f"Unexpected error in main execution: {e}")
 
 # Run the main loop
 if __name__ == "__main__":

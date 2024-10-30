@@ -1,42 +1,44 @@
 # Required libraries for the project
-torch==2.0.1
-torchvision==0.15.2
-numpy==1.26.0
-pandas==2.1.0
-ccxt==4.0.95
-flask==2.3.2
+torchvision
+pandas
+ccxt
+flask
 
 # Other Dependencies
-python-dotenv==1.0.0
-matplotlib==3.7.2
-requests==2.31.0
-aiohttp==3.8.5
-pytz==2023.3
-SQLAlchemy==2.0.20
+python-dotenv
+matplotlib
+requests
+aiohttp
+pytz
+SQLAlchemy
 
 # AI and Machine Learning Libraries
-tensorflow==2.14.0
-stable-baselines3==1.8.0
+tensorflow
+stable-baselines3
 
 # Reinforcement Learning
-gymnasium==0.29.0
+gymnasium
 
 # Data Handling and Scientific Libraries
-scikit-learn==1.3.0
-scipy==1.11.2
+scikit-learn
+scipy
 
 # Trading API Clients (DEX, CEX)
-web3==6.10.0
+web3
 
 # Database and ORM Libraries
-PyMySQL==1.1.0
-mysqlclient==2.2.0
+PyMySQL
+mysqlclient
 
 # Logging and Monitoring
-loguru==0.7.3
-prometheus-client==0.17.1
+loguru
+prometheus-client
 
 # API Integration and Web Servers
-fastapi==0.103.1
-uvicorn==0.23.2
-gunicorn==20.1.0
+fastapi
+uvicorn
+gunicorn
+
+
+# Missing Modules
+psutil
