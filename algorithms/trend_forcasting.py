@@ -5,55 +5,72 @@ from ..database.db_connection import DatabaseConnection
 
 class TrendForecaster:
     """
-    Forecasts market trends using ARIMA modeling and integrates multi-horizon forecasting.
+    Forecasts market trends using ARIMA and ensemble forecasting techniques.
     
     Attributes:
-    - db (DatabaseConnection): Database connection for logging predictions.
-    - model_params (dict): Parameters for ARIMA model initialization.
+    - db (DatabaseConnection): Database for logging predictions.
+    - model_cache (dict): Cache for storing trained ARIMA models by asset.
+    - ensemble_params (dict): Parameters for ARIMA and ensemble modeling.
     """
 
-    def __init__(self, db: DatabaseConnection, model_params=None):
+    def __init__(self, db: DatabaseConnection, ensemble_params=None):
         self.db = db
-        self.model_params = model_params or {"order": (5, 1, 0)}
+        self.ensemble_params = ensemble_params or {"arima_order": (5, 1, 0), "ensemble_weights": [0.7, 0.3]}
         self.model_cache = {}
         self.logger = logging.getLogger(__name__)
 
-    def train_model(self, asset: str, historical_data: np.ndarray):
+    def train_arima_model(self, asset: str, historical_data: np.ndarray):
         """
-        Trains an ARIMA model for a given asset with historical data.
-        
+        Trains an ARIMA model for a specified asset.
+
         Args:
-        - asset (str): Asset symbol to train model on.
+        - asset (str): Asset to train on.
         - historical_data (np.ndarray): Historical price data.
         """
-        model = ARIMA(historical_data, order=self.model_params["order"])
+        model = ARIMA(historical_data, order=self.ensemble_params["arima_order"])
         self.model_cache[asset] = model.fit()
-        self.logger.info(f"ARIMA model trained for {asset}.")
+        self.logger.info(f"Trained ARIMA model for {asset}.")
 
     def forecast(self, asset: str, steps: int = 5) -> np.ndarray:
         """
         Generates a multi-horizon forecast for the specified asset.
-        
+
         Args:
         - asset (str): Asset symbol to forecast.
         - steps (int): Number of time steps to forecast.
-        
+
         Returns:
-        - np.ndarray: Array of forecasted values.
+        - np.ndarray: Forecasted values.
         """
-        model = self.model_cache.get(asset)
-        if not model:
-            self.logger.warning(f"No model found for {asset}.")
+        arima_model = self.model_cache.get(asset)
+        if not arima_model:
+            self.logger.warning(f"No trained ARIMA model for {asset}.")
             return np.array([])
 
-        forecast = model.forecast(steps=steps)
+        forecast = arima_model.forecast(steps=steps)
         self.logger.info(f"Generated forecast for {asset}: {forecast}")
         return forecast
 
+    def ensemble_forecast(self, arima_forecast: np.ndarray, recent_trend: np.ndarray) -> np.ndarray:
+        """
+        Generates an ensemble forecast by combining ARIMA and recent trend data.
+
+        Args:
+        - arima_forecast (np.ndarray): Forecasted values from ARIMA.
+        - recent_trend (np.ndarray): Recent price trend data.
+
+        Returns:
+        - np.ndarray: Ensemble forecast values.
+        """
+        weights = self.ensemble_params["ensemble_weights"]
+        ensemble_forecast = weights[0] * arima_forecast + weights[1] * recent_trend[-len(arima_forecast):]
+        self.logger.info(f"Ensemble forecast generated: {ensemble_forecast}")
+        return ensemble_forecast
+
     def update_predictions(self, asset: str, forecast: np.ndarray):
         """
-        Logs predictions into the database for historical tracking and analysis.
-        
+        Logs predictions into the database.
+
         Args:
         - asset (str): Asset symbol.
         - forecast (np.ndarray): Forecasted values.
@@ -61,33 +78,18 @@ class TrendForecaster:
         self.db.log_forecast(asset, forecast.tolist())
         self.logger.info(f"Forecast for {asset} updated in the database.")
 
-    def analyze_trend(self, asset: str, recent_data: np.ndarray) -> str:
+    def apply_trend_forecast(self, asset: str, historical_data: np.ndarray, recent_trend: np.ndarray, steps: int = 5):
         """
-        Analyzes recent price data to determine if a trend is bullish, bearish, or neutral.
-        
-        Args:
-        - asset (str): Asset symbol.
-        - recent_data (np.ndarray): Most recent price data.
-        
-        Returns:
-        - str: "bullish", "bearish", or "neutral" indicating trend direction.
-        """
-        slope = np.polyfit(range(len(recent_data)), recent_data, 1)[0]
-        trend = "bullish" if slope > 0 else "bearish" if slope < 0 else "neutral"
-        self.logger.info(f"Trend analysis for {asset}: {trend}")
-        return trend
-
-    def apply_forecast(self, asset: str, recent_data: np.ndarray, steps: int = 5):
-        """
-        Trains, forecasts, and logs the trend for the specified asset.
+        Trains the model, generates an ensemble forecast, and logs results.
 
         Args:
         - asset (str): Asset symbol.
-        - recent_data (np.ndarray): Recent data for model training.
+        - historical_data (np.ndarray): Historical data for model training.
+        - recent_trend (np.ndarray): Recent data for trend analysis.
         - steps (int): Forecast horizon.
         """
-        self.train_model(asset, recent_data)
-        forecast = self.forecast(asset, steps)
-        self.update_predictions(asset, forecast)
-        trend = self.analyze_trend(asset, recent_data)
-        self.logger.info(f"Finalized forecast and trend for {asset}: {trend}")
+        self.train_arima_model(asset, historical_data)
+        arima_forecast = self.forecast(asset, steps)
+        ensemble_prediction = self.ensemble_forecast(arima_forecast, recent_trend)
+        self.update_predictions(asset, ensemble_prediction)
+        self.logger.info(f"Finalized ensemble forecast for {asset}.")
