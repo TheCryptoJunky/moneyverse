@@ -1,183 +1,84 @@
-# Full file path: /moneyverse/managers/wallet_manager.py
-
-import asyncio
-import random
-import requests
-from datetime import datetime, timedelta
-from all_logging.centralized_logger import CentralizedLogger
-from utils.error_handler import handle_errors
-from managers.list_manager import ListManager
-from src.services.gas_price_service import GasPriceService
-from src.services.aggregator_service import AggregatorService
-from utils.retry_decorator import retry  # Import retry decorator
-from managers.configuration_manager import ConfigurationManager
-import mysql.connector
-
-logger = CentralizedLogger()
-list_manager = ListManager()
-gas_service = GasPriceService()
-aggregator_service = AggregatorService()
-config_manager = ConfigurationManager()
+import logging
+from typing import List, Dict
+from cryptography.fernet import Fernet  # For encryption of sensitive data
+from ..wallet.wallet import Wallet
+from ..database.db_connection import DatabaseConnection
 
 class WalletManager:
     """
-    Manages wallets used in bot operations, including initialization, fund distribution,
-    secure transfers, AI-driven rebalancing, and validation against lists.
+    Manages wallets, including their initialization, asset balancing, and secure storage.
+
+    Attributes:
+    - db (DatabaseConnection): Database connection instance for storage.
+    - encryption_key (bytes): Key for encrypting sensitive wallet information.
+    - wallets (Dict[str, Wallet]): Active wallets managed by this manager.
     """
 
-    def __init__(self):
-        self.wallets = []
-        # Load rebalancing threshold dynamically from the database
-        self.rebalance_threshold = float(config_manager.get_config("rebalance_threshold") or 5000)
+    def __init__(self, db: DatabaseConnection, encryption_key: bytes):
+        self.db = db
+        self.encryption = Fernet(encryption_key)
+        self.wallets = {}
+        self.logger = logging.getLogger(__name__)
 
-    async def initialize_wallets(self):
+    def register_wallet(self, wallet: Wallet):
         """
-        Asynchronously initialize all wallets required for bot operations.
-        """
-        logger.log("info", "Initializing wallets...")
-        try:
-            await asyncio.sleep(1)  # Simulate async wallet loading
-            self.wallets = [
-                {"wallet_id": "wallet1", "balance": 100, "status": "active", "tokens": []},
-                {"wallet_id": "wallet2", "balance": 250, "status": "active", "tokens": []},
-                {"wallet_id": "wallet3", "balance": 300, "status": "active", "tokens": []}
-            ]
-            logger.log("info", f"Wallets initialized: {self.wallets}")
-        except Exception as e:
-            logger.log("error", f"Error initializing wallets: {str(e)}")
-            handle_errors(e)
-
-    async def ai_autonomous_rebalance(self):
-        """
-        AI-driven autonomous rebalancing when wallet balance threshold is reached.
-        Uses least expensive transfer options and obfuscates transactions to prevent MEV attacks.
-        """
-        logger.log("info", "Starting AI-driven rebalancing.")
-        for wallet in self.wallets:
-            # Reload rebalancing threshold from the database dynamically
-            self.rebalance_threshold = float(config_manager.get_config("rebalance_threshold") or 5000)
-            if wallet["balance"] >= self.rebalance_threshold:
-                await self.perform_rebalance(wallet)
-
-    async def perform_rebalance(self, wallet):
-        """
-        Perform rebalancing for the specified wallet using gas cost prediction,
-        aggregator selection, and obfuscation layers to minimize MEV attack risks.
+        Registers a new wallet, storing it securely in the database.
         
-        Parameters:
-            wallet (dict): Wallet information including balance and tokens.
+        Args:
+        - wallet (Wallet): Wallet instance to register.
         """
-        try:
-            # Step 1: Determine low-cost transfer timing
-            gas_price = gas_service.get_optimal_gas_price()
-            logger.log("info", f"Optimal gas price: {gas_price}")
+        encrypted_phrase = self.encrypt(wallet.recovery_phrase)
+        self.wallets[wallet.address] = wallet
+        self.db.save_wallet({
+            "address": wallet.address,
+            "recovery_phrase": encrypted_phrase,
+            "initial_balance": wallet.get_balance(),
+        })
+        self.logger.info(f"Registered wallet {wallet.address} with initial balance {wallet.get_balance()}.")
 
-            # Step 2: Select best aggregator/swap source based on cost and asset stability
-            selected_aggregator = await self.select_best_aggregator(wallet["balance"])
-            logger.log("info", f"Selected aggregator for rebalancing: {selected_aggregator['name']}")
+    def encrypt(self, data: str) -> bytes:
+        """Encrypts sensitive data."""
+        return self.encryption.encrypt(data.encode())
 
-            # Step 3: Rebalance using stable or low-volatility assets
-            stable_assets = ["USDT", "USDC", "DAI"]
-            if wallet["tokens"] in stable_assets or wallet["balance"] > 1000:
-                target_asset = "USDC"  # Example stable asset for holding value
-            else:
-                target_asset = await self.select_least_volatile_token()
+    def decrypt(self, encrypted_data: bytes) -> str:
+        """Decrypts sensitive data."""
+        return self.encryption.decrypt(encrypted_data).decode()
 
-            # Execute swap through selected aggregator to target asset
-            success = aggregator_service.execute_swap(
-                source_wallet=wallet["wallet_id"],
-                target_asset=target_asset,
-                amount=wallet["balance"],
-                aggregator=selected_aggregator,
-                gas_price=gas_price
-            )
-            if success:
-                logger.log("info", f"Rebalanced {wallet['wallet_id']} to {target_asset} using {selected_aggregator['name']}.")
-
-        except Exception as e:
-            logger.log("error", f"Error during rebalancing for {wallet['wallet_id']}: {e}")
-            handle_errors(e)
-
-    async def select_best_aggregator(self, balance):
+    def redistribute_assets(self, target_wallet: Wallet, amount: float):
         """
-        Selects the best aggregator based on cost efficiency and reliability.
+        Rebalances assets by transferring the specified amount to the target wallet.
         
-        Parameters:
-            balance (float): Amount to be rebalanced.
-
-        Returns:
-            dict: Selected aggregator configuration.
+        Args:
+        - target_wallet (Wallet): Wallet to receive the assets.
+        - amount (float): Amount to adjust.
         """
-        aggregators = aggregator_service.get_available_aggregators()
-        best_aggregator = min(aggregators, key=lambda agg: agg["cost"] * balance)
-        logger.log("info", f"Best aggregator chosen: {best_aggregator['name']}")
-        return best_aggregator
+        # Placeholder for actual transfer logic
+        current_balance = target_wallet.get_balance()
+        target_wallet.update_balance(current_balance + amount)
+        self.db.update_wallet_balance(target_wallet.address, target_wallet.get_balance())
+        self.logger.info(f"Redistributed {amount} to wallet {target_wallet.address}. New balance: {target_wallet.get_balance()}")
 
-    async def select_least_volatile_token(self):
+    def get_wallets(self) -> List[Wallet]:
         """
-        Selects a token with low volatility, ideal for stable asset storage during rebalancing.
+        Retrieves all active wallets managed by this manager.
         
         Returns:
-            str: Token symbol with low volatility.
+        - list: All wallet instances.
         """
-        volatility_data = aggregator_service.get_token_volatility_data()
-        least_volatile_token = min(volatility_data, key=lambda token: token["volatility"])
-        logger.log("info", f"Selected least volatile token: {least_volatile_token['symbol']}")
-        return least_volatile_token["symbol"]
-
-    def distribute_funds_across_wallets(self, total_funds):
+        return list(self.wallets.values())
+    
+    def secure_retrieve_wallet(self, address: str) -> Wallet:
         """
-        Distributes the provided total funds across wallets to avoid detection of large balances.
-        Ensures that funds are spread evenly and safely.
-        """
-        logger.log("info", f"Distributing total funds of {total_funds} across wallets.")
-        try:
-            num_wallets = len(self.wallets)
-            funds_per_wallet = total_funds / num_wallets
-            for wallet in self.wallets:
-                wallet["balance"] += funds_per_wallet
-                logger.log("info", f"Distributed {funds_per_wallet} to {wallet['wallet_id']} (new balance: {wallet['balance']})")
-        except Exception as e:
-            logger.log("error", f"Error during fund distribution: {str(e)}")
-            handle_errors(e)
-
-    @retry(retries=4, delay=2, backoff=2, fallback_function=lambda: logger.error("Failed to insert wallet state after retries"))
-    def store_wallet_state_in_db(self, wallet_id, state):
-        """
-        Store the current state of a wallet in the database with retries.
+        Retrieves a wallet by address, decrypting sensitive information.
         
-        Parameters:
-            wallet_id (str): The wallet identifier.
-            state (str): State of the wallet (e.g., 'active', 'inactive').
+        Args:
+        - address (str): Wallet address to retrieve.
+        
+        Returns:
+        - Wallet: The decrypted wallet instance.
         """
-        try:
-            connection = mysql.connector.connect(
-                host="localhost",
-                user="username",
-                password="password",
-                database="wallet_db"
-            )
-            cursor = connection.cursor()
-            query = "INSERT INTO wallet_states (wallet_id, state, timestamp) VALUES (%s, %s, NOW())"
-            cursor.execute(query, (wallet_id, state))
-            connection.commit()
-            cursor.close()
-            connection.close()
-            logger.info(f"Successfully stored wallet state for {wallet_id}: {state}")
-        except mysql.connector.Error as e:
-            logger.error(f"MySQL error storing wallet state for {wallet_id}: {e}")
-            raise
-
-    def validate_wallets_against_lists(self):
-        """
-        Validate wallets against blacklist/whitelist from ListManager.
-        Logs any wallets that are blacklisted and sets their status as disabled.
-        """
-        logger.log("info", "Validating wallets against blacklist and whitelist.")
-        for wallet in self.wallets:
-            if list_manager.is_blacklisted(wallet["wallet_id"]):
-                wallet["status"] = "blacklisted"
-                logger.log("warning", f"Wallet {wallet['wallet_id']} is blacklisted and has been disabled.")
-            else:
-                wallet["status"] = "active"
-                logger.log("info", f"Wallet {wallet['wallet_id']} is valid and active.")
+        encrypted_data = self.db.get_wallet_data(address)
+        recovery_phrase = self.decrypt(encrypted_data["recovery_phrase"])
+        wallet = Wallet(address=address, recovery_phrase=recovery_phrase)
+        self.logger.info(f"Retrieved wallet {address} securely.")
+        return wallet
