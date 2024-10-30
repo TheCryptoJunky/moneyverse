@@ -1,58 +1,98 @@
+import logging
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
+from pomegranate import BayesianNetwork, DiscreteDistribution, ConditionalProbabilityTable, State
+from ..database.db_connection import DatabaseConnection
 
-class PGM(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim):
-        super(PGM, self).__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, action_dim)
+class PGMModel:
+    """
+    Probabilistic Graphical Model (PGM) that uses Bayesian Networks to make probabilistic predictions.
+    
+    Attributes:
+    - db (DatabaseConnection): Database connection for logging predictions.
+    - model (BayesianNetwork): Bayesian Network model instance.
+    """
 
-    def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+    def __init__(self, db: DatabaseConnection):
+        self.db = db
+        self.model = self._build_model()
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("Initialized Bayesian Network for PGMModel.")
 
-class PGMRLAgent:
-    def __init__(self, state_dim, action_dim, hidden_dim, learning_rate, gamma):
-        self.model = PGM(state_dim, action_dim, hidden_dim)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
-        self.gamma = gamma
+    def _build_model(self):
+        """
+        Constructs the Bayesian Network with conditional probability tables.
 
-    def select_action(self, state):
-        state = torch.tensor(state, dtype=torch.float32)
-        q_values = self.model(state)
-        action = torch.argmax(q_values).item()
-        return action
+        Returns:
+        - BayesianNetwork: Initialized Bayesian Network model.
+        """
+        # Define prior distributions for variables
+        market_trend = DiscreteDistribution({"bullish": 0.5, "bearish": 0.5})
+        volatility = DiscreteDistribution({"low": 0.5, "high": 0.5})
 
-    def update(self, state, action, reward, next_state):
-        state = torch.tensor(state, dtype=torch.float32)
-        next_state = torch.tensor(next_state, dtype=torch.float32)
-        q_values = self.model(state)
-        next_q_values = self.model(next_state)
-        q_target = q_values.clone()
-        q_target[action] = reward + self.gamma * torch.max(next_q_values)
-        loss = (q_values - q_target).pow(2).mean()
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        # Conditional probability tables based on dependencies
+        price_movement = ConditionalProbabilityTable(
+            [
+                ["bullish", "low", "up", 0.7],
+                ["bullish", "low", "down", 0.3],
+                ["bullish", "high", "up", 0.6],
+                ["bullish", "high", "down", 0.4],
+                ["bearish", "low", "up", 0.2],
+                ["bearish", "low", "down", 0.8],
+                ["bearish", "high", "up", 0.1],
+                ["bearish", "high", "down", 0.9]
+            ],
+            [market_trend, volatility]
+        )
 
-# Example usage:
-if __name__ == "__main__":
-    state_dim = 10
-    action_dim = 5
-    hidden_dim = 20
-    learning_rate = 0.001
-    gamma = 0.99
+        # Create states
+        market_trend_state = State(market_trend, name="market_trend")
+        volatility_state = State(volatility, name="volatility")
+        price_movement_state = State(price_movement, name="price_movement")
 
-    agent = PGMRLAgent(state_dim, action_dim, hidden_dim, learning_rate, gamma)
+        # Build the network
+        model = BayesianNetwork("Market Analysis Network")
+        model.add_states(market_trend_state, volatility_state, price_movement_state)
+        model.add_edge(market_trend_state, price_movement_state)
+        model.add_edge(volatility_state, price_movement_state)
+        model.bake()
 
-    state = np.random.rand(state_dim)
-    action = agent.select_action(state)
-    next_state = np.random.rand(state_dim)
-    reward = np.random.rand()
+        return model
 
-    agent.update(state, action, reward, next_state)
+    def predict_market_movement(self, market_trend: str, volatility: str) -> str:
+        """
+        Predicts market movement based on given trend and volatility levels.
+
+        Args:
+        - market_trend (str): The current market trend ("bullish" or "bearish").
+        - volatility (str): The current market volatility ("low" or "high").
+
+        Returns:
+        - str: Predicted market movement ("up" or "down").
+        """
+        belief = self.model.predict_proba({"market_trend": market_trend, "volatility": volatility})
+        price_movement_belief = belief[-1].parameters[0]
+        prediction = "up" if price_movement_belief["up"] > price_movement_belief["down"] else "down"
+        self.logger.info(f"Market prediction based on trend {market_trend} and volatility {volatility}: {prediction}")
+        return prediction
+
+    def log_prediction(self, asset: str, prediction: str):
+        """
+        Logs probabilistic predictions into the database for historical tracking.
+
+        Args:
+        - asset (str): Asset symbol.
+        - prediction (str): Predicted market movement.
+        """
+        self.db.log_forecast(asset, {"market_prediction": prediction})
+        self.logger.info(f"Logged prediction for {asset}: {prediction}")
+
+    def update_model(self, new_data: dict):
+        """
+        Updates the Bayesian Network with new data to refine predictions.
+
+        Args:
+        - new_data (dict): Dictionary containing market data for updating probabilities.
+        """
+        # Placeholder for dynamic model update
+        # Example: Retrain conditional probabilities with new data if needed
+        self.logger.info("Bayesian Network updated with new data.")
