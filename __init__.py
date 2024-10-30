@@ -6,6 +6,7 @@ from .managers.goal_manager import GoalManager
 from .managers.strategy_manager import StrategyManager
 from .trade_executor import TradeExecutor
 from .utils import error_handler, logging_util
+from .flask_gui import create_app
 
 __all__ = [
     "WalletManager",
@@ -14,4 +15,5 @@ __all__ = [
     "TradeExecutor",
     "error_handler",
     "logging_util",
+    "create_app",
 ]
