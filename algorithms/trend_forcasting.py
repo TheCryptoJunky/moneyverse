@@ -1,21 +1,22 @@
 import numpy as np
 import logging
 from statsmodels.tsa.arima.model import ARIMA
+from sklearn.linear_model import LinearRegression
 from ..database.db_connection import DatabaseConnection
 
 class TrendForecaster:
     """
-    Forecasts market trends using ARIMA and ensemble forecasting techniques.
+    Forecasts market trends using ARIMA and regression modeling with adaptive multi-horizon forecasting.
     
     Attributes:
     - db (DatabaseConnection): Database for logging predictions.
-    - model_cache (dict): Cache for storing trained ARIMA models by asset.
-    - ensemble_params (dict): Parameters for ARIMA and ensemble modeling.
+    - model_cache (dict): Cache of trained models by asset.
+    - params (dict): Parameters for ARIMA and linear regression models.
     """
 
-    def __init__(self, db: DatabaseConnection, ensemble_params=None):
+    def __init__(self, db: DatabaseConnection, params=None):
         self.db = db
-        self.ensemble_params = ensemble_params or {"arima_order": (5, 1, 0), "ensemble_weights": [0.7, 0.3]}
+        self.params = params or {"arima_order": (5, 1, 0), "regression_weights": [0.8, 0.2]}
         self.model_cache = {}
         self.logger = logging.getLogger(__name__)
 
@@ -24,72 +25,81 @@ class TrendForecaster:
         Trains an ARIMA model for a specified asset.
 
         Args:
-        - asset (str): Asset to train on.
+        - asset (str): Asset symbol.
         - historical_data (np.ndarray): Historical price data.
         """
-        model = ARIMA(historical_data, order=self.ensemble_params["arima_order"])
+        model = ARIMA(historical_data, order=self.params["arima_order"])
         self.model_cache[asset] = model.fit()
         self.logger.info(f"Trained ARIMA model for {asset}.")
 
-    def forecast(self, asset: str, steps: int = 5) -> np.ndarray:
+    def forecast_arima(self, asset: str, steps: int = 5) -> np.ndarray:
         """
-        Generates a multi-horizon forecast for the specified asset.
+        Generates a forecast using the ARIMA model.
 
         Args:
-        - asset (str): Asset symbol to forecast.
-        - steps (int): Number of time steps to forecast.
-
+        - asset (str): Asset symbol.
+        - steps (int): Forecast horizon.
+        
         Returns:
         - np.ndarray: Forecasted values.
         """
         arima_model = self.model_cache.get(asset)
         if not arima_model:
-            self.logger.warning(f"No trained ARIMA model for {asset}.")
+            self.logger.warning(f"No trained ARIMA model found for {asset}.")
             return np.array([])
-
+        
         forecast = arima_model.forecast(steps=steps)
-        self.logger.info(f"Generated forecast for {asset}: {forecast}")
+        self.logger.info(f"ARIMA forecast for {asset}: {forecast}")
         return forecast
 
-    def ensemble_forecast(self, arima_forecast: np.ndarray, recent_trend: np.ndarray) -> np.ndarray:
+    def regression_forecast(self, recent_data: np.ndarray, steps: int = 5) -> np.ndarray:
         """
-        Generates an ensemble forecast by combining ARIMA and recent trend data.
+        Generates a linear regression forecast based on recent data trends.
 
         Args:
-        - arima_forecast (np.ndarray): Forecasted values from ARIMA.
-        - recent_trend (np.ndarray): Recent price trend data.
+        - recent_data (np.ndarray): Recent price data.
+        - steps (int): Forecast horizon.
 
         Returns:
-        - np.ndarray: Ensemble forecast values.
+        - np.ndarray: Forecasted values.
         """
-        weights = self.ensemble_params["ensemble_weights"]
-        ensemble_forecast = weights[0] * arima_forecast + weights[1] * recent_trend[-len(arima_forecast):]
-        self.logger.info(f"Ensemble forecast generated: {ensemble_forecast}")
-        return ensemble_forecast
+        model = LinearRegression()
+        x = np.arange(len(recent_data)).reshape(-1, 1)
+        model.fit(x, recent_data)
+        x_future = np.arange(len(recent_data), len(recent_data) + steps).reshape(-1, 1)
+        forecast = model.predict(x_future)
+        self.logger.info(f"Regression forecast: {forecast}")
+        return forecast
 
-    def update_predictions(self, asset: str, forecast: np.ndarray):
+    def ensemble_forecast(self, arima_forecast: np.ndarray, regression_forecast: np.ndarray) -> np.ndarray:
         """
-        Logs predictions into the database.
+        Combines forecasts from ARIMA and regression using weighted averaging.
+
+        Args:
+        - arima_forecast (np.ndarray): ARIMA model forecast.
+        - regression_forecast (np.ndarray): Regression model forecast.
+
+        Returns:
+        - np.ndarray: Ensemble forecast.
+        """
+        weights = self.params["regression_weights"]
+        ensemble = weights[0] * arima_forecast + weights[1] * regression_forecast
+        self.logger.info(f"Ensemble forecast: {ensemble}")
+        return ensemble
+
+    def update_forecasts(self, asset: str, historical_data: np.ndarray, recent_data: np.ndarray, steps: int = 5):
+        """
+        Trains models, generates an ensemble forecast, and logs results.
 
         Args:
         - asset (str): Asset symbol.
-        - forecast (np.ndarray): Forecasted values.
-        """
-        self.db.log_forecast(asset, forecast.tolist())
-        self.logger.info(f"Forecast for {asset} updated in the database.")
-
-    def apply_trend_forecast(self, asset: str, historical_data: np.ndarray, recent_trend: np.ndarray, steps: int = 5):
-        """
-        Trains the model, generates an ensemble forecast, and logs results.
-
-        Args:
-        - asset (str): Asset symbol.
-        - historical_data (np.ndarray): Historical data for model training.
-        - recent_trend (np.ndarray): Recent data for trend analysis.
+        - historical_data (np.ndarray): Historical data for ARIMA training.
+        - recent_data (np.ndarray): Recent data for regression and ensemble.
         - steps (int): Forecast horizon.
         """
         self.train_arima_model(asset, historical_data)
-        arima_forecast = self.forecast(asset, steps)
-        ensemble_prediction = self.ensemble_forecast(arima_forecast, recent_trend)
-        self.update_predictions(asset, ensemble_prediction)
-        self.logger.info(f"Finalized ensemble forecast for {asset}.")
+        arima_forecast = self.forecast_arima(asset, steps)
+        regression_forecast = self.regression_forecast(recent_data, steps)
+        ensemble_forecast = self.ensemble_forecast(arima_forecast, regression_forecast)
+        self.db.log_forecast(asset, ensemble_forecast.tolist())
+        self.logger.info(f"Forecast for {asset} logged successfully.")
