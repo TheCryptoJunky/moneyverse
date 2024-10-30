@@ -2,19 +2,19 @@ version: '3.8'
 
 services:
   trading-bot:
-    image: your-docker-image  # Replace with your actual Docker image
+    image: your-docker-image  # Replace with your actual Docker image name
     container_name: trading_bot_container
     environment:
-      - MYSQL_HOST=db
-      - MYSQL_USER=root
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}  # Use an environment variable for secret management
-      - MYSQL_DB=trading
-      - API_KEY=${API_KEY}  # Add any required environment variables here
-      - EXCHANGE_URL=${EXCHANGE_URL}
+      MYSQL_HOST: db
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}  # Store password in environment variable for security
+      MYSQL_DB: trading
+      API_KEY: ${API_KEY}  # Secure API keys via environment variables
+      EXCHANGE_URL: ${EXCHANGE_URL}
     volumes:
-      - ./src:/usr/src/app  # Mount local source code for live development
+      - ./src:/usr/src/app  # Mount source code for development
     ports:
-      - "8000:8000"  # Expose the web application port
+      - "8000:8000"  # Expose the application port
     depends_on:
       - db
 
@@ -22,10 +22,10 @@ services:
     image: mysql:8.0
     container_name: mysql_db
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}  # Use environment variables for sensitive data
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}  # Store sensitive data securely
       MYSQL_DATABASE: trading
     ports:
-      - "3306:3306"  # Expose the MySQL port
+      - "3306:3306"  # MySQL port exposure
     volumes:
       - db-data:/var/lib/mysql  # Persist MySQL data
 
@@ -33,16 +33,16 @@ services:
     build: .
     container_name: rl_agent_manager_container
     environment:
-      - API_KEY=${API_KEY}  # Use environment variables to securely pass API keys
-      - EXCHANGE_URL=${EXCHANGE_URL}
+      API_KEY: ${API_KEY}  # Securely pass API key
+      EXCHANGE_URL: ${EXCHANGE_URL}
     ports:
-      - "8080:8080"  # Expose the agent manager service
+      - "8080:8080"  # Expose the agent manager service port
     deploy:
-      replicas: 3  # Scale the number of RL agent instances
+      replicas: 3  # Scale number of RL agent instances
       resources:
         limits:
-          cpus: "1.0"  # Limit to 1 CPU per agent
-          memory: 1024M  # Limit memory usage per agent to 1GB
+          cpus: "1.0"  # CPU limit per instance
+          memory: 1024M  # Memory limit per instance
     depends_on:
       - trading-bot
 
