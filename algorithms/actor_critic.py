@@ -1,86 +1,132 @@
-# /bot/src/rl_agent/actor_critic.py
-
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-
-class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(Actor, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 128)
-        self.fc2 = nn.Linear(128, 128)
-        self.fc3 = nn.Linear(128, action_dim)
-
-    def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = torch.softmax(self.fc3(x), dim=0)
-        return x
-
-class Critic(nn.Module):
-    def __init__(self, state_dim):
-        super(Critic, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 128)
-        self.fc2 = nn.Linear(128, 128)
-        self.fc3 = nn.Linear(128, 1)
-
-    def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+import logging
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.optimizers import Adam
+from .replay_buffer import ReplayBuffer
 
 class ActorCriticAgent:
-    def __init__(self, state_dim, action_dim, epsilon=0.1, learning_rate=0.001):
-        self.state_dim = state_dim
-        self.action_dim = action_dim
-        self.epsilon = epsilon
-        self.actor = Actor(state_dim, action_dim)
-        self.critic = Critic(state_dim)
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=learning_rate)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=learning_rate)
-        self.memory = []
+    """
+    Actor-Critic agent that learns optimal actions through policy and value updates.
+
+    Attributes:
+    - state_size (int): Size of the input state space.
+    - action_size (int): Size of the output action space.
+    - gamma (float): Discount factor for future rewards.
+    - actor_model (Sequential): Neural network model for policy (actor).
+    - critic_model (Sequential): Neural network model for value estimation (critic).
+    - replay_buffer (ReplayBuffer): Shared experience buffer.
+    - learning_rate (float): Learning rate for adaptive updates.
+    """
+
+    def __init__(self, state_size, action_size, gamma=0.99, learning_rate=0.001):
+        self.state_size = state_size
+        self.action_size = action_size
+        self.gamma = gamma
+        self.learning_rate = learning_rate
+        self.actor_model = self._build_actor()
+        self.critic_model = self._build_critic()
+        self.replay_buffer = ReplayBuffer(max_size=2000)
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("Actor-Critic agent initialized.")
+
+    def _build_actor(self):
+        """
+        Builds and compiles the actor model.
+        
+        Returns:
+        - Sequential: Compiled actor model.
+        """
+        model = Sequential([
+            Dense(24, input_dim=self.state_size, activation="relu"),
+            Dense(24, activation="relu"),
+            Dense(self.action_size, activation="softmax")
+        ])
+        model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss="categorical_crossentropy")
+        self.logger.info("Actor model built and compiled.")
+        return model
+
+    def _build_critic(self):
+        """
+        Builds and compiles the critic model.
+        
+        Returns:
+        - Sequential: Compiled critic model.
+        """
+        model = Sequential([
+            Dense(24, input_dim=self.state_size, activation="relu"),
+            Dense(24, activation="relu"),
+            Dense(1, activation="linear")
+        ])
+        model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss="mean_squared_error")
+        self.logger.info("Critic model built and compiled.")
+        return model
 
     def act(self, state):
-        if np.random.rand() < self.epsilon:
-            return np.random.randint(0, self.action_dim)
-        else:
-            state = torch.tensor(state, dtype=torch.float32)
-            action_probs = self.actor(state)
-            return torch.argmax(action_probs).item()
+        """
+        Selects an action based on the current policy.
 
-    def remember(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done))
+        Args:
+        - state (np.ndarray): Current state.
 
-    def replay(self, batch_size):
-        batch = np.random.choice(self.memory, batch_size, replace=False)
-        states = torch.tensor([x[0] for x in batch], dtype=torch.float32)
-        actions = torch.tensor([x[1] for x in batch], dtype=torch.int64)
-        rewards = torch.tensor([x[2] for x in batch], dtype=torch.float32)
-        next_states = torch.tensor([x[3] for x in batch], dtype=torch.float32)
-        dones = torch.tensor([x[4] for x in batch], dtype=torch.bool)
+        Returns:
+        - int: Action index.
+        """
+        policy = self.actor_model.predict(state)[0]
+        action = np.random.choice(self.action_size, p=policy)
+        self.logger.debug(f"Selected action {action} with policy {policy}.")
+        return action
 
-        action_probs = self.actor(states)
-        action_log_probs = torch.log(action_probs)
-        q_values = self.critic(states)
-        next_q_values = self.critic(next_states)
-        q_targets = q_values.clone()
-        q_targets[range(batch_size)] = rewards + 0.99 * next_q_values * (~dones)
+    def store_experience(self, state, action, reward, next_state, done):
+        """
+        Stores an experience in the replay buffer.
 
-        actor_loss = -action_log_probs[range(batch_size), actions] * (q_targets - q_values)
-        critic_loss = (q_values - q_targets).pow(2)
-        loss = actor_loss.mean() + critic_loss.mean()
+        Args:
+        - state: Current state.
+        - action: Action taken.
+        - reward: Reward received.
+        - next_state: Next state after action.
+        - done (bool): Whether the episode has ended.
+        """
+        self.replay_buffer.store((state, action, reward, next_state, done))
+        self.logger.debug("Stored experience in replay buffer.")
 
-        self.actor_optimizer.zero_grad()
-        self.critic_optimizer.zero_grad()
-        loss.backward()
-        self.actor_optimizer.step()
-        self.critic_optimizer.step()
+    def train(self, batch_size=32):
+        """
+        Trains the actor and critic networks using experiences from the replay buffer.
 
-# Example usage:
-# agent = ActorCriticAgent(state_dim=10, action_dim=3)
-# state = np.random.rand(10)
-# action = agent.act(state)
-# agent.remember(state, action, 1.0, np.random.rand(10), False)
-# agent.replay(32)
+        Args:
+        - batch_size (int): Number of experiences to sample for training.
+        """
+        if len(self.replay_buffer) < batch_size:
+            self.logger.warning("Insufficient experiences for training.")
+            return
+
+        experiences, _ = self.replay_buffer.sample(batch_size)
+        for state, action, reward, next_state, done in experiences:
+            target = reward + (1 - done) * self.gamma * self.critic_model.predict(next_state)[0]
+            td_error = target - self.critic_model.predict(state)[0]
+            
+            # Update critic
+            self.critic_model.fit(state, target, verbose=0)
+
+            # Update actor
+            action_onehot = np.zeros(self.action_size)
+            action_onehot[action] = 1
+            self.actor_model.fit(state, action_onehot * td_error, verbose=0)
+        
+        # Adjust learning rate dynamically based on training progress
+        self.learning_rate = max(0.0001, self.learning_rate * 0.995)
+        self.logger.info(f"Trained on batch; learning rate adjusted to {self.learning_rate}.")
+
+    def adaptive_learning_rate(self, initial_lr, decay_rate, min_lr):
+        """
+        Adjusts the learning rate adaptively.
+
+        Args:
+        - initial_lr (float): Starting learning rate.
+        - decay_rate (float): Rate of learning rate decay.
+        - min_lr (float): Minimum learning rate.
+        """
+        self.learning_rate = max(min_lr, initial_lr * decay_rate)
+        self.logger.info(f"Learning rate updated to {self.learning_rate}.")
