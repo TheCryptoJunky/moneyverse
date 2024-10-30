@@ -3,7 +3,7 @@ from strategies.mev_strategy import MEV_STRATEGIES
 from managers.wallet_swarm import WalletSwarm
 from utils.error_handler import log_error
 
-# Initialize WalletSwarm or any other required components
+# Initialize WalletSwarm and other required components
 wallet_swarm = WalletSwarm()
 
 class StrategyExecutor:
@@ -33,11 +33,11 @@ class StrategyExecutor:
             log_error(f"Error executing strategy {self.strategy_name}: {e}")
 
 async def main():
-    # Example: Choose strategy based on input or config
+    # Prompt user for strategy selection
     strategy_name = input("Enter the strategy to execute: ")
     strategy_executor = StrategyExecutor(strategy_name, wallet_swarm)
 
-    # Sample market data (replace with actual data fetch in production)
+    # Placeholder for market data (replace with actual data in production)
     market_data = {
         'exchange1': 5000,
         'exchange2': 5100,
