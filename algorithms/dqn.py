@@ -1,64 +1,124 @@
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-
-class DQN(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(DQN, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 128)
-        self.fc2 = nn.Linear(128, 128)
-        self.fc3 = nn.Linear(128, action_dim)
-
-    def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+import logging
+from collections import deque
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.optimizers import Adam
+from ..database.db_connection import DatabaseConnection
+from .replay_buffer import ReplayBuffer
 
 class DQNAgent:
-    def __init__(self, state_dim, action_dim, epsilon=0.1, gamma=0.99):
-        self.state_dim = state_dim
-        self.action_dim = action_dim
-        self.epsilon = epsilon
+    """
+    Deep Q-Network (DQN) Agent that learns optimal actions through reinforcement learning.
+    
+    Attributes:
+    - db (DatabaseConnection): Database for logging performance.
+    - state_size (int): Size of the state space.
+    - action_size (int): Size of the action space.
+    - memory (ReplayBuffer): Experience replay buffer for training.
+    - epsilon (float): Exploration-exploitation parameter.
+    """
+
+    def __init__(self, state_size, action_size, db: DatabaseConnection, gamma=0.95, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995, learning_rate=0.001, batch_size=32):
+        self.state_size = state_size
+        self.action_size = action_size
+        self.memory = ReplayBuffer(max_size=2000)
         self.gamma = gamma
-        self.model = DQN(state_dim, action_dim)
-        self.target_model = DQN(state_dim, action_dim)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
-        self.buffer = []
+        self.epsilon = epsilon
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.model = self._build_model()
+        self.db = db
+        self.logger = logging.getLogger(__name__)
 
-    def select_action(self, state):
-        if np.random.rand() < self.epsilon:
-            return np.random.randint(self.action_dim)
+    def _build_model(self):
+        """
+        Builds the neural network model for the DQN.
+        
+        Returns:
+        - keras.Sequential: Compiled neural network model.
+        """
+        model = Sequential([
+            Dense(24, input_dim=self.state_size, activation="relu"),
+            Dense(24, activation="relu"),
+            Dense(self.action_size, activation="linear")
+        ])
+        model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss="mse")
+        self.logger.info("DQN model built and compiled.")
+        return model
+
+    def remember(self, state, action, reward, next_state, done):
+        """
+        Stores an experience in the replay buffer.
+        
+        Args:
+        - state: Current state.
+        - action: Action taken.
+        - reward: Reward received.
+        - next_state: Next state after action.
+        - done (bool): Whether the episode has ended.
+        """
+        self.memory.store((state, action, reward, next_state, done))
+        self.logger.debug("Experience stored in replay buffer.")
+
+    def act(self, state):
+        """
+        Chooses an action based on the epsilon-greedy policy.
+        
+        Args:
+        - state: Current state.
+        
+        Returns:
+        - int: Action index.
+        """
+        if np.random.rand() <= self.epsilon:
+            action = np.random.choice(self.action_size)
+            self.logger.debug("Exploration: Random action selected.")
         else:
-            state = torch.tensor(state, dtype=torch.float32)
-            q_values = self.model(state)
-            return torch.argmax(q_values).item()
+            action_values = self.model.predict(state)
+            action = np.argmax(action_values[0])
+            self.logger.debug("Exploitation: Best action selected.")
+        return action
 
-    def update(self, state, action, reward, next_state):
-        self.buffer.append((state, action, reward, next_state))
-        if len(self.buffer) > 1000:
-            self.buffer.pop(0)
+    def replay(self):
+        """
+        Trains the DQN model using experiences from the replay buffer.
+        """
+        if len(self.memory) < self.batch_size:
+            self.logger.warning("Insufficient experiences for replay.")
+            return
 
-        state = torch.tensor(state, dtype=torch.float32)
-        action = torch.tensor(action, dtype=torch.long)
-        reward = torch.tensor(reward, dtype=torch.float32)
-        next_state = torch.tensor(next_state, dtype=torch.float32)
+        minibatch = self.memory.sample(self.batch_size)
+        for state, action, reward, next_state, done in minibatch:
+            target = reward
+            if not done:
+                target += self.gamma * np.amax(self.model.predict(next_state)[0])
+            target_f = self.model.predict(state)
+            target_f[0][action] = target
+            self.model.fit(state, target_f, epochs=1, verbose=0)
+        
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
+        self.logger.info(f"Trained on replay batch; epsilon now {self.epsilon}")
 
-        q_values = self.model(state)
-        next_q_values = self.target_model(next_state)
-        q_target = q_values.clone()
-        q_target[action] = reward + self.gamma * torch.max(next_q_values)
+    def save(self, name):
+        """
+        Saves the model to disk.
+        
+        Args:
+        - name (str): File path to save the model.
+        """
+        self.model.save(name)
+        self.logger.info(f"Model saved to {name}")
 
-        loss = (q_values - q_target).pow(2).mean()
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-
-        self.target_model.load_state_dict(self.model.state_dict())
-
-    def save(self, path):
-        torch.save(self.model.state_dict(), path)
-
-    def load(self, path):
-        self.model.load_state_dict(torch.load(path))
+    def load(self, name):
+        """
+        Loads a model from disk.
+        
+        Args:
+        - name (str): File path to load the model from.
+        """
+        self.model.load_weights(name)
+        self.logger.info(f"Model loaded from {name}")
