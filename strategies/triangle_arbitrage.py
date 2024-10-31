@@ -1,128 +1,84 @@
-# Full file path: /moneyverse/strategies/triangle_arbitrage.py
+# moneyverse/strategies/triangle_arbitrage_bot.py
 
+import logging
 import asyncio
-from ai.agents.rl_agent import RLTradingAgent
-from centralized_logger import CentralizedLogger
-from src.managers.transaction_manager import TransactionManager
-from src.managers.risk_manager import RiskManager
-from market_data import MarketDataAPI
-from src.safety.safety_manager import SafetyManager
-from src.utils.error_handler import handle_errors
-from ai.rl_algorithms import DDPGAgent, PPOAgent, LSTM_MemoryAgent, MARLAgent
-
-# Initialize components
-logger = CentralizedLogger()
-transaction_manager = TransactionManager()
-risk_manager = RiskManager()
-safety_manager = SafetyManager()
-market_data_api = MarketDataAPI()
-
-# Initialize multiple RL agents for dynamic selection, including memory-based LSTM
-ddpg_agent = DDPGAgent(environment="triangle_arbitrage")
-ppo_agent = PPOAgent(environment="triangle_arbitrage")
-lstm_agent = LSTM_MemoryAgent(environment="triangle_arbitrage")
-marl_agent = MARLAgent(environment="triangle_arbitrage")
-
-# Track performance for each agent
-agent_performance = {"DDPG": 0, "PPO": 0, "LSTM": 0, "MARL": 0}
+from typing import Callable
 
 class TriangleArbitrageBot:
-    def __init__(self):
-        self.running = True
-        self.rl_agent = None
-        self.select_agent()  # Initialize with the best-performing agent
+    """
+    Executes triangle arbitrage by exploiting price discrepancies between three assets in a triangular trading loop.
 
-    def select_agent(self):
-        """Select the best-performing agent based on recent trade performance."""
-        best_agent_name = max(agent_performance, key=agent_performance.get)
-        self.rl_agent = {
-            "DDPG": ddpg_agent,
-            "PPO": ppo_agent,
-            "LSTM": lstm_agent,
-            "MARL": marl_agent,
-        }[best_agent_name]
-        logger.log_info(f"Selected agent: {best_agent_name}")
+    Attributes:
+    - price_monitor (Callable): Function to monitor asset prices for triangular arbitrage conditions.
+    - trade_executor (Callable): Function to execute trades based on identified triangular discrepancies.
+    - logger (Logger): Logs triangular arbitrage actions and detected opportunities.
+    """
 
-    async def fetch_market_data(self):
-        """Fetch market data specific to triangle arbitrage opportunities."""
-        try:
-            market_data = await market_data_api.get_triangle_arbitrage_data()
-            logger.log_info(f"Fetched triangle arbitrage market data: {market_data}")
-            return market_data
-        except Exception as e:
-            logger.log_error(f"Failed to fetch market data: {e}")
-            handle_errors(e)
-            return None
+    def __init__(self, price_monitor: Callable, trade_executor: Callable):
+        self.price_monitor = price_monitor
+        self.trade_executor = trade_executor
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("TriangleArbitrageBot initialized.")
 
-    def ai_decision(self, market_data):
-        """Make an AI-driven trading decision using the selected RL agent."""
-        try:
-            action = self.rl_agent.decide_action(market_data)
-            logger.log_info(f"RL action decision: {action}")
-            return action
-        except Exception as e:
-            logger.log_error(f"Error in AI decision-making: {e}")
-            handle_errors(e)
-            return None
+    async def monitor_triangular_arbitrage(self):
+        """
+        Continuously monitors prices for triangular arbitrage conditions.
+        """
+        self.logger.info("Monitoring for triangular arbitrage opportunities.")
+        while True:
+            opportunity = await self.price_monitor()
+            if opportunity:
+                await self.execute_triangle_arbitrage(opportunity)
+            await asyncio.sleep(0.5)  # Adjusted for frequent checks
 
-    async def execute_trade(self, trade_data):
-        """Execute the trade and update agent performance based on success or failure."""
-        trade_success = await transaction_manager.execute_trade(trade_data)
-        agent_type = self.rl_agent.__class__.__name__
+    async def execute_triangle_arbitrage(self, opportunity: dict):
+        """
+        Executes a triangular arbitrage trade based on detected opportunity.
 
-        if trade_success:
-            logger.log_info(f"Trade executed: {trade_data}")
-            agent_performance[agent_type] += 1  # Reward successful trade
+        Args:
+        - opportunity (dict): Data on the triangular price discrepancy.
+        """
+        assets = opportunity.get("assets")  # Tuple of the three assets involved in the loop
+        trade_sequence = opportunity.get("trade_sequence")  # Sequence of trades in the loop
+        amount = opportunity.get("amount")
+        self.logger.info(f"Executing triangular arbitrage on {assets} with trade sequence {trade_sequence} and amount {amount}")
+
+        # Execute the triangular arbitrage trade
+        success = await self.trade_executor(assets, trade_sequence, amount)
+        if success:
+            self.logger.info(f"Triangular arbitrage trade succeeded for assets {assets}")
         else:
-            logger.log_warning(f"Trade failed: {trade_data}")
-            agent_performance[agent_type] -= 1  # Penalize failed trade
+            self.logger.warning(f"Triangular arbitrage trade failed for assets {assets}")
 
-    async def run(self):
-        """Main loop to operate the triangle arbitrage bot with dynamic agent selection."""
-        logger.log_info("Starting Triangle Arbitrage Bot with dynamic agent selection...")
-        try:
-            while self.running:
-                # Re-evaluate and select the best-performing agent if necessary
-                if max(agent_performance.values()) != agent_performance[self.rl_agent.__class__.__name__]:
-                    self.select_agent()
+    # ---------------- Opportunity Handler for Mempool Integration Starts Here ----------------
+    def handle_triangle_arbitrage_opportunity(self, opportunity: dict):
+        """
+        Responds to detected triangular arbitrage opportunities from MempoolMonitor.
 
-                market_data = await self.fetch_market_data()
-                if market_data is None:
-                    logger.log_warning("No market data available; retrying in 30 seconds.")
-                    await asyncio.sleep(30)
-                    continue
+        Args:
+        - opportunity (dict): Opportunity data detected by the MempoolMonitor.
+        """
+        assets = opportunity.get("assets")
+        trade_sequence = opportunity.get("trade_sequence")
+        amount = opportunity.get("amount")
 
-                action = self.ai_decision(market_data)
-                if action is None:
-                    logger.log_warning("AI decision failed; retrying in 30 seconds.")
-                    await asyncio.sleep(30)
-                    continue
+        self.logger.info(f"Triangular arbitrage opportunity detected for assets {assets} with sequence {trade_sequence} and amount {amount}")
 
-                # Safety and risk checks before executing trades
-                if safety_manager.is_safe_to_proceed(trade_data=action):
-                    if risk_manager.is_risk_compliant(market_data):
-                        trade_data = {
-                            "source_wallet": action.get("source_wallet"),
-                            "amount": action.get("amount"),
-                            "trade_type": "triangle_arbitrage"
-                        }
-                        await self.execute_trade(trade_data)
-                    else:
-                        logger.log_warning("Risk thresholds exceeded. Skipping trade execution.")
-                else:
-                    logger.log_warning("Safety check failed. Aborting trade execution.")
+        # Execute triangular arbitrage asynchronously
+        asyncio.create_task(self.execute_triangle_arbitrage(opportunity))
+    # ---------------- Opportunity Handler Ends Here ----------------
 
-                await asyncio.sleep(30)  # Adjust timing for triangle arbitrage cycle
+    # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
+    def handle_flash_loan_opportunity(self, opportunity: dict):
+        """
+        Responds to detected flash loan opportunities from FlashLoanMonitor.
 
-        except Exception as e:
-            logger.log_error(f"Error in Triangle Arbitrage Bot: {e}")
-            handle_errors(e)
+        Args:
+        - opportunity (dict): Opportunity data detected by FlashLoanMonitor.
+        """
+        asset = opportunity.get("asset")
+        amount = opportunity.get("amount")
 
-    def stop(self):
-        """Stops the triangle arbitrage bot."""
-        logger.log_info("Stopping Triangle Arbitrage Bot...")
-        self.running = False
-
-if __name__ == "__main__":
-    bot = TriangleArbitrageBot()
-    asyncio.run(bot.run())
+        self.logger.info(f"Flash loan opportunity detected for triangular arbitrage on {asset} with amount {amount}")
+        asyncio.create_task(self.request_flash_loan(asset, amount))  # Trigger flash loan asynchronously
+    # ---------------- Opportunity Handler for Flash Loan Integration Ends Here ----------------

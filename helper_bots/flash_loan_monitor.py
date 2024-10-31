@@ -1,70 +1,70 @@
 # moneyverse/helper_bots/flash_loan_monitor.py
 
 import logging
-import time
-from typing import Callable, List, Dict
+import asyncio
+from typing import Callable
 
 class FlashLoanMonitor:
     """
-    Monitors liquidity pools and markets for flash loan arbitrage opportunities.
+    Monitors flash loan providers to detect and evaluate flash loan opportunities.
 
     Attributes:
-    - analysis_func (Callable): Function to analyze pools for flash loan opportunities.
-    - strategies (List[Callable]): List of strategy functions to be notified on opportunities.
-    - managers (List[Callable]): List of manager functions to coordinate strategy actions.
-    - logger (Logger): Logs monitoring, detections, and notifications.
+    - add_opportunity_callback (Callable): Function to add detected flash loan opportunities to the manager.
+    - logger (Logger): Logs flash loan monitoring activities and detected opportunities.
     """
 
-    def __init__(self, analysis_func: Callable, strategies: List[Callable] = None, managers: List[Callable] = None):
-        self.analysis_func = analysis_func  # Analysis function for flash loan conditions
-        self.strategies = strategies or []  # Strategies to notify (e.g., Flash Loan Arbitrage)
-        self.managers = managers or []  # Managers for coordination (e.g., Risk Manager, Transaction Manager)
+    def __init__(self):
+        self.add_opportunity_callback = None
         self.logger = logging.getLogger(__name__)
-        self.logger.info("FlashLoanMonitor initialized for centralized flash loan monitoring.")
+        self.logger.info("FlashLoanMonitor initialized.")
 
-    def register_strategy(self, strategy_func: Callable):
+    def set_opportunity_callback(self, callback: Callable):
         """
-        Registers a strategy to be notified on detected flash loan opportunities.
-        """
-        self.strategies.append(strategy_func)
-        self.logger.info(f"Registered strategy {strategy_func.__name__} for flash loan notifications.")
-
-    def register_manager(self, manager_func: Callable):
-        """
-        Registers a manager to coordinate actions on detected flash loan opportunities.
-        """
-        self.managers.append(manager_func)
-        self.logger.info(f"Registered manager {manager_func.__name__} for flash loan coordination.")
-
-    def monitor_flash_loans(self, interval: float = 1.0):
-        """
-        Continuously monitors for flash loan arbitrage opportunities.
+        Sets the callback function for adding flash loan opportunities to the central manager.
 
         Args:
-        - interval (float): Time interval between checks in seconds.
+        - callback (Callable): Function to add detected opportunities.
         """
-        self.logger.info("Starting flash loan monitoring.")
+        self.add_opportunity_callback = callback
+
+    async def detect_opportunities(self):
+        """
+        Continuously monitors for flash loan availability and detects potential opportunities.
+        """
+        self.logger.info("Starting flash loan monitoring for opportunities.")
         while True:
-            opportunities = self.analysis_func()
-            if opportunities:
-                self.notify_strategies(opportunities)
-                self.notify_managers(opportunities)
-            time.sleep(interval)
+            flash_loan_data = await self.fetch_flash_loan_data()
+            opportunity = self.analyze_flash_loan_data(flash_loan_data)
 
-    def notify_strategies(self, opportunities: List[Dict[str, any]]):
-        """
-        Notifies all registered strategies of detected opportunities.
-        """
-        for strategy_func in self.strategies:
-            for opportunity in opportunities:
-                self.logger.info(f"Notifying {strategy_func.__name__} of flash loan opportunity for {opportunity['asset']}")
-                strategy_func(opportunity)
+            if opportunity and self.add_opportunity_callback:
+                self.add_opportunity_callback(opportunity)
+                self.logger.info(f"Detected and added flash loan opportunity: {opportunity}")
 
-    def notify_managers(self, opportunities: List[Dict[str, any]]):
+            await asyncio.sleep(1)  # Adjust frequency as needed
+
+    async def fetch_flash_loan_data(self):
         """
-        Notifies all registered managers to coordinate strategy actions.
+        Fetches data from flash loan providers (placeholder).
+        Replace with actual API calls or data fetching logic.
         """
-        for manager_func in self.managers:
-            for opportunity in opportunities:
-                self.logger.info(f"Notifying manager {manager_func.__name__} of flash loan opportunity for {opportunity['asset']}")
-                manager_func(opportunity)
+        # Simulated example flash loan data
+        return {"provider": "Provider1", "asset": "ETH", "amount": 1000.0, "fee_rate": 0.001}
+
+    def analyze_flash_loan_data(self, flash_loan_data):
+        """
+        Analyzes flash loan data to detect suitable opportunities.
+
+        Args:
+        - flash_loan_data (dict): Data from a flash loan provider.
+
+        Returns:
+        - dict: Detected flash loan opportunity, or None if no opportunity found.
+        """
+        if flash_loan_data["fee_rate"] < 0.002:  # Example threshold
+            return {
+                "type": "batch_flash_loan",
+                "asset": flash_loan_data["asset"],
+                "amount": flash_loan_data["amount"],
+                "provider": flash_loan_data["provider"]
+            }
+        return None
