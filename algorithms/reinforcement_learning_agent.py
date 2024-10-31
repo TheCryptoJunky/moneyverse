@@ -1,78 +1,126 @@
 import numpy as np
 import logging
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.optimizers import Adam
 from .replay_buffer import ReplayBuffer
 
-class ReinforcementAgent:
+class ReinforcementLearningAgent:
     """
-    Reinforcement Learning Agent for optimizing trading strategy prioritization and decision-making.
+    Reinforcement Learning Agent that learns optimal actions through Q-learning.
     
     Attributes:
+    - state_size (int): Size of the input state space.
+    - action_size (int): Number of possible actions.
+    - gamma (float): Discount factor for future rewards.
+    - epsilon (float): Exploration-exploitation parameter.
+    - model (Sequential): Q-network for action-value estimation.
     - replay_buffer (ReplayBuffer): Experience replay buffer for training.
-    - action_values (dict): Tracks performance metrics for each strategy.
-    - epsilon (float): Exploration-exploitation trade-off parameter.
     """
 
-    def __init__(self, epsilon=0.1):
-        self.replay_buffer = ReplayBuffer()
-        self.action_values = {}
+    def __init__(self, state_size, action_size, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995, learning_rate=0.001):
+        self.state_size = state_size
+        self.action_size = action_size
+        self.gamma = gamma
         self.epsilon = epsilon
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
+        self.learning_rate = learning_rate
+        self.model = self._build_model()
+        self.replay_buffer = ReplayBuffer(max_size=2000)
         self.logger = logging.getLogger(__name__)
+        self.logger.info("Reinforcement Learning Agent initialized.")
 
-    def prioritize_strategies(self, strategies: list) -> list:
+    def _build_model(self):
         """
-        Prioritize strategies using epsilon-greedy selection to balance exploration and exploitation.
-        
-        Args:
-        - strategies (list): List of strategy names.
-        
+        Builds and compiles the Q-network model.
+
         Returns:
-        - list: Ordered list of strategy names based on prioritization.
+        - Sequential: Compiled Q-network model.
         """
-        if np.random.rand() < self.epsilon:
-            prioritized = np.random.permutation(strategies).tolist()
-            self.logger.info("Exploration step: Random strategy prioritization.")
+        model = Sequential([
+            Dense(24, input_dim=self.state_size, activation="relu"),
+            Dense(24, activation="relu"),
+            Dense(self.action_size, activation="linear")
+        ])
+        model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss="mse")
+        self.logger.info("Q-network model built and compiled.")
+        return model
+
+    def act(self, state):
+        """
+        Selects an action based on the epsilon-greedy policy.
+
+        Args:
+        - state (np.ndarray): Current state.
+
+        Returns:
+        - int: Selected action index.
+        """
+        if np.random.rand() <= self.epsilon:
+            action = np.random.choice(self.action_size)  # Exploration
+            self.logger.debug(f"Exploration: Random action selected {action}")
         else:
-            prioritized = sorted(strategies, key=lambda s: self.action_values.get(s, 0), reverse=True)
-            self.logger.info("Exploitation step: Prioritizing strategies by past performance.")
-        return prioritized
+            action_values = self.model.predict(state)
+            action = np.argmax(action_values[0])  # Exploitation
+            self.logger.debug(f"Exploitation: Best action selected {action}")
+        return action
 
-    def update_strategy_performance(self, strategy_name: str, reward: float):
+    def remember(self, state, action, reward, next_state, done):
         """
-        Updates the Q-value for a strategy based on the received reward.
-        
+        Stores an experience in the replay buffer.
+
         Args:
-        - strategy_name (str): Name of the strategy.
-        - reward (float): Reward received for the strategy's performance.
+        - state (np.ndarray): Current state.
+        - action (int): Action taken.
+        - reward (float): Reward received.
+        - next_state (np.ndarray): Next state.
+        - done (bool): Whether the episode ended.
         """
-        current_value = self.action_values.get(strategy_name, 0)
-        updated_value = current_value + 0.1 * (reward - current_value)
-        self.action_values[strategy_name] = updated_value
-        self.logger.info(f"Updated Q-value for {strategy_name}: {updated_value}")
+        self.replay_buffer.store((state, action, reward, next_state, done))
+        self.logger.info("Stored experience in replay buffer.")
 
-    def add_experience(self, experience):
+    def replay(self, batch_size=32):
         """
-        Adds an experience to the replay buffer for training.
-        
-        Args:
-        - experience: Tuple (state, action, reward, next_state).
-        """
-        self.replay_buffer.store(experience)
-        self.logger.info("Added new experience to replay buffer.")
+        Trains the model using experiences from the replay buffer.
 
-    def train(self, batch_size=32):
-        """
-        Trains the agent using a sample from the replay buffer.
-        
         Args:
         - batch_size (int): Number of experiences to sample for training.
         """
-        if self.replay_buffer.size() < batch_size:
-            self.logger.warning("Not enough experiences in buffer to train.")
+        if len(self.replay_buffer) < batch_size:
+            self.logger.warning("Not enough experiences to train.")
             return
 
-        batch = self.replay_buffer.sample(batch_size)
-        for state, action, reward, next_state in batch:
-            current_value = self.action_values.get(action, 0)
-            updated_value = current_value + 0.1 * (reward + np.max([self.action_values.get(a, 0) for a in next_state]) - current_value)
-            self.action_values[action] = updated_value
-            self.logger.info(f"Trained on action {action}, updated Q-value: {updated_value}")
+        minibatch, weights = self.replay_buffer.sample(batch_size)
+        for state, action, reward, next_state, done in minibatch:
+            target = reward
+            if not done:
+                target += self.gamma * np.amax(self.model.predict(next_state)[0])
+
+            target_f = self.model.predict(state)
+            target_f[0][action] = target
+            self.model.fit(state, target_f, epochs=1, verbose=0)
+
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
+        self.logger.info(f"Trained on batch; epsilon decayed to {self.epsilon}")
+
+    def save(self, path):
+        """
+        Saves the model to a file.
+
+        Args:
+        - path (str): File path to save the model.
+        """
+        self.model.save(path)
+        self.logger.info(f"Model saved to {path}")
+
+    def load(self, path):
+        """
+        Loads the model from a file.
+
+        Args:
+        - path (str): File path to load the model.
+        """
+        self.model.load_weights(path)
+        self.logger.info(f"Model loaded from {path}")
