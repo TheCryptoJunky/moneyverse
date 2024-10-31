@@ -1,17 +1,17 @@
 import logging
 import requests
-from typing import Dict, List
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from typing import Dict, List
 from ..database.db_connection import DatabaseConnection
 
 class SentimentAnalyzer:
     """
-    Analyzes market sentiment from various sources and integrates real-time sentiment scoring.
-    
+    Analyzes market sentiment by aggregating data from multiple sources, including news and social media.
+
     Attributes:
-    - db (DatabaseConnection): Database connection for logging sentiment scores.
-    - sources (list): List of sentiment data sources (e.g., news sites, social media).
-    - analyzer (SentimentIntensityAnalyzer): Sentiment analysis tool.
+    - db (DatabaseConnection): Database for logging sentiment data.
+    - sources (list): List of sentiment data sources.
+    - analyzer (SentimentIntensityAnalyzer): Analyzer for calculating sentiment scores.
     """
 
     def __init__(self, db: DatabaseConnection, sources: List[str] = None):
@@ -23,35 +23,35 @@ class SentimentAnalyzer:
         self.analyzer = SentimentIntensityAnalyzer()
         self.logger = logging.getLogger(__name__)
 
-    def fetch_sentiment_data(self) -> Dict[str, List[str]]:
+    def fetch_data(self) -> Dict[str, List[str]]:
         """
-        Fetches real-time sentiment data from configured sources.
+        Fetches sentiment data from the configured sources.
 
         Returns:
-        - dict: Dictionary of sentiment data by source.
+        - dict: Collected sentiment data by source.
         """
         sentiment_data = {}
-        headers = {"Authorization": "Bearer YOUR_API_KEY"}  # Replace with actual token
+        headers = {"Authorization": "Bearer YOUR_API_KEY"}  # Placeholder for API key
 
         for source in self.sources:
             try:
                 response = requests.get(source, headers=headers)
                 if response.status_code == 200:
                     sentiment_data[source] = response.json()["content"]
-                    self.logger.info(f"Fetched sentiment data from {source}.")
+                    self.logger.info(f"Fetched data from {source}")
                 else:
-                    self.logger.warning(f"Failed to fetch data from {source}. Status code: {response.status_code}")
+                    self.logger.warning(f"Failed to fetch data from {source}, Status: {response.status_code}")
             except Exception as e:
-                self.logger.error(f"Error fetching sentiment data from {source}: {e}")
+                self.logger.error(f"Error fetching data from {source}: {e}")
 
         return sentiment_data
 
     def analyze_sentiment(self, text_data: List[str]) -> float:
         """
-        Analyzes and aggregates sentiment scores for a list of text data.
+        Analyzes and calculates an average sentiment score.
 
         Args:
-        - text_data (list): List of text entries to analyze.
+        - text_data (list): Text entries to analyze.
 
         Returns:
         - float: Average sentiment score.
@@ -61,25 +61,24 @@ class SentimentAnalyzer:
         self.logger.info(f"Calculated average sentiment score: {average_score}")
         return average_score
 
-    def log_sentiment_score(self, source: str, score: float):
+    def log_sentiment(self, source: str, score: float):
         """
-        Logs sentiment scores into the database for each source.
+        Logs sentiment score for a particular source in the database.
 
         Args:
-        - source (str): The source of the sentiment data.
-        - score (float): Calculated sentiment score.
+        - source (str): Source of the sentiment data.
+        - score (float): Sentiment score.
         """
         self.db.log_sentiment(source, score)
-        self.logger.info(f"Logged sentiment score for {source}: {score}")
+        self.logger.info(f"Logged sentiment score from {source}: {score}")
 
-    def update_sentiment_scores(self):
+    def update_sentiments(self):
         """
-        Fetches sentiment data, calculates sentiment scores, and logs results for each source.
+        Aggregates and logs sentiment data from all sources.
         """
-        sentiment_data = self.fetch_sentiment_data()
-
+        sentiment_data = self.fetch_data()
         for source, data in sentiment_data.items():
             score = self.analyze_sentiment(data)
-            self.log_sentiment_score(source, score)
+            self.log_sentiment(source, score)
 
         self.logger.info("Updated sentiment scores from all sources.")
