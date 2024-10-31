@@ -1,104 +1,114 @@
 # moneyverse/managers/transaction_manager.py
 
 import logging
+import time
 from typing import Dict, Optional
-from moneyverse.database.db_connection import DatabaseConnection
 
 class TransactionManager:
     """
-    Manages trade execution, tracking, and logging across assets and exchanges.
+    Manages the lifecycle of each transaction, ensuring retries, logging, and handling failures.
 
     Attributes:
-    - db (DatabaseConnection): Database connection for logging transactions.
-    - logger (Logger): Logs trade executions and any failures or risks.
+    - max_retries (int): Maximum number of retries for a transaction.
+    - retry_interval (float): Time in seconds between retries.
+    - transaction_log (dict): Stores transaction details and statuses.
+    - logger (Logger): Logs transaction statuses and issues.
     """
 
-    def __init__(self, db: DatabaseConnection):
-        self.db = db
+    def __init__(self, max_retries=3, retry_interval=5.0):
+        self.max_retries = max_retries
+        self.retry_interval = retry_interval
+        self.transaction_log = {}  # {transaction_id: {status, retries}}
         self.logger = logging.getLogger(__name__)
-        self.logger.info("TransactionManager initialized.")
+        self.logger.info("TransactionManager initialized with retry policies.")
 
-    def execute_trade(self, wallet, asset: str, amount: float, price: float, action: str, exchange: str) -> Optional[Dict[str, float]]:
+    def initiate_transaction(self, transaction_id: str, transaction_data: Dict[str, any]):
         """
-        Executes a trade and logs it to the database.
+        Initiates a new transaction, logging it and setting its initial status.
 
         Args:
-        - wallet (Wallet): Wallet instance for executing the trade.
-        - asset (str): Asset to trade.
-        - amount (float): Quantity of the asset to trade.
-        - price (float): Current price for the trade.
-        - action (str): "buy" or "sell" action.
-        - exchange (str): Name of the exchange where the trade is executed.
-
-        Returns:
-        - dict: Details of the executed trade if successful, None if failed.
+        - transaction_id (str): Unique identifier for the transaction.
+        - transaction_data (dict): Data for the transaction (e.g., asset, amount, action).
         """
-        try:
-            trade_value = amount * price
-            if action == "buy":
-                wallet.update_balance(asset, trade_value)
-                self.logger.info(f"Executed buy of {amount} {asset} at {price} on {exchange}.")
-            elif action == "sell":
-                wallet.update_balance(asset, -trade_value)
-                self.logger.info(f"Executed sell of {amount} {asset} at {price} on {exchange}.")
-            else:
-                self.logger.error(f"Invalid trade action: {action}")
-                return None
+        self.transaction_log[transaction_id] = {
+            "data": transaction_data,
+            "status": "initiated",
+            "retries": 0
+        }
+        self.logger.info(f"Initiated transaction {transaction_id}: {transaction_data}")
 
-            # Log transaction in the database
-            self.db.log_transaction(asset, amount, price, action, exchange)
-            return {
-                "asset": asset,
-                "amount": amount,
-                "price": price,
-                "action": action,
-                "exchange": exchange,
-                "trade_value": trade_value
-            }
-
-        except Exception as e:
-            self.logger.error(f"Trade execution failed for {amount} {asset} at {price} on {exchange}: {str(e)}")
-            return None
-
-    def monitor_trade(self, asset: str, target_price: float, current_price: float) -> bool:
+    def process_transaction(self, transaction_id: str, execute_func: callable) -> bool:
         """
-        Monitors an open trade for target price and manages risk.
+        Processes a transaction by attempting to execute it with retries.
 
         Args:
-        - asset (str): Asset being monitored.
-        - target_price (float): Desired target price to achieve profit.
-        - current_price (float): Current market price of the asset.
+        - transaction_id (str): Unique identifier for the transaction.
+        - execute_func (callable): Function to execute the transaction.
 
         Returns:
-        - bool: True if target achieved, False if monitoring continues.
+        - bool: True if transaction succeeds, False if it fails after retries.
         """
-        if current_price >= target_price:
-            self.logger.info(f"Target price of {target_price} reached for {asset}.")
-            return True
-        else:
-            self.logger.debug(f"Target price not reached for {asset}. Current price: {current_price}")
+        transaction = self.transaction_log.get(transaction_id)
+        if not transaction:
+            self.logger.error(f"Transaction {transaction_id} not found in log.")
             return False
 
-    def log_trade_failure(self, asset: str, amount: float, action: str, reason: str):
+        success = False
+        while transaction["retries"] < self.max_retries:
+            try:
+                success = execute_func(transaction["data"])
+                if success:
+                    transaction["status"] = "completed"
+                    self.logger.info(f"Transaction {transaction_id} completed successfully.")
+                    break
+                else:
+                    raise Exception("Transaction execution returned False.")
+            except Exception as e:
+                transaction["retries"] += 1
+                self.logger.warning(f"Retrying transaction {transaction_id} (Attempt {transaction['retries']}): {str(e)}")
+                time.sleep(self.retry_interval)
+
+        if not success:
+            transaction["status"] = "failed"
+            self.logger.error(f"Transaction {transaction_id} failed after {self.max_retries} retries.")
+        return success
+
+    def get_transaction_status(self, transaction_id: str) -> Optional[str]:
         """
-        Logs a failed trade attempt.
+        Retrieves the status of a specific transaction.
 
         Args:
-        - asset (str): Asset for which the trade failed.
-        - amount (float): Quantity of the asset.
-        - action (str): "buy" or "sell" action.
-        - reason (str): Reason for trade failure.
-        """
-        self.logger.warning(f"Trade failure logged for {amount} {asset}, action: {action}, reason: {reason}.")
-        self.db.log_trade_failure(asset, amount, action, reason)
+        - transaction_id (str): Unique identifier for the transaction.
 
-    def update_trade_status(self, trade_id: int, status: str):
+        Returns:
+        - str: Current status of the transaction or None if not found.
         """
-        Updates the status of a trade in the database.
+        transaction = self.transaction_log.get(transaction_id)
+        if transaction:
+            return transaction["status"]
+        self.logger.warning(f"Transaction {transaction_id} not found.")
+        return None
+
+    def handle_failed_transactions(self):
+        """
+        Handles all failed transactions, potentially logging them for review or re-initiating.
+        """
+        for transaction_id, transaction in self.transaction_log.items():
+            if transaction["status"] == "failed":
+                self.logger.error(f"Handling failed transaction {transaction_id}. Review required.")
+
+    def cancel_transaction(self, transaction_id: str):
+        """
+        Cancels a transaction if it has not been completed, marking it as canceled.
 
         Args:
-        - trade_id (int): ID of the trade to update.
-        - status (str): New status, e.g., "completed" or "failed".
+        - transaction_id (str): Unique identifier for the transaction.
         """
-        self.db.update_trade_status(trade_id, status)
-        self.logger.info(f"Updated trade ID {trade_id} to status: {status}")
+        transaction = self.transaction_log.get(transaction_id)
+        if transaction and transaction["status"] != "completed":
+            transaction["status"] = "canceled"
+            self.logger.info(f"Transaction {transaction_id} has been canceled.")
+        elif transaction and transaction["status"] == "completed":
+            self.logger.warning(f"Transaction {transaction_id} already completed and cannot be canceled.")
+        else:
+            self.logger.warning(f"Transaction {transaction_id} not found in log.")
