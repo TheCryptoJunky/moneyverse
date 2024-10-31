@@ -1,91 +1,89 @@
-# moneyverse/strategies/spatial_arbitrage.py
+# moneyverse/strategies/spread_arbitrage.py
 
 import logging
 import asyncio
 from typing import Callable
 
-class SpatialArbitrageBot:
+class SpreadArbitrageBot:
     """
-    Executes spatial arbitrage by capitalizing on price differences of the same asset across different exchanges.
+    Executes spread arbitrage by capitalizing on bid-ask spread differences for the same asset across one or multiple exchanges.
 
     Attributes:
-    - spatial_monitor (Callable): Function to monitor asset prices across exchanges.
-    - trade_executor (Callable): Function to execute trades based on spatial arbitrage opportunities.
-    - logger (Logger): Logs spatial arbitrage actions and detected opportunities.
+    - spread_monitor (Callable): Function to monitor bid-ask spreads for arbitrage opportunities.
+    - trade_executor (Callable): Function to execute trades based on spread opportunities.
+    - logger (Logger): Logs spread arbitrage actions and detected opportunities.
     """
 
-    def __init__(self, spatial_monitor: Callable, trade_executor: Callable):
-        self.spatial_monitor = spatial_monitor
+    def __init__(self, spread_monitor: Callable, trade_executor: Callable):
+        self.spread_monitor = spread_monitor
         self.trade_executor = trade_executor
         self.logger = logging.getLogger(__name__)
-        self.logger.info("SpatialArbitrageBot initialized.")
+        self.logger.info("SpreadArbitrageBot initialized.")
 
-    async def monitor_spatial_opportunities(self):
+    async def monitor_spread_opportunities(self):
         """
-        Continuously monitors for price discrepancies across exchanges to detect spatial arbitrage opportunities.
+        Continuously monitors bid-ask spreads to detect arbitrage opportunities.
         """
-        self.logger.info("Monitoring exchanges for spatial arbitrage opportunities.")
+        self.logger.info("Monitoring bid-ask spreads for arbitrage opportunities.")
         while True:
-            spatial_opportunity = await self.spatial_monitor()
-            if spatial_opportunity:
-                await self.execute_spatial_trade(spatial_opportunity)
-            await asyncio.sleep(0.5)  # Adjust frequency based on market conditions
+            spread_opportunity = await self.spread_monitor()
+            if spread_opportunity:
+                await self.execute_spread_trade(spread_opportunity)
+            await asyncio.sleep(0.5)  # Adjust monitoring frequency as needed
 
-    async def execute_spatial_trade(self, spatial_opportunity: dict):
+    async def execute_spread_trade(self, spread_opportunity: dict):
         """
-        Executes a trade based on a detected price discrepancy across exchanges.
+        Executes a trade based on a detected bid-ask spread discrepancy.
 
         Args:
-        - spatial_opportunity (dict): Data on the price difference for an asset across exchanges.
+        - spread_opportunity (dict): Data on the spread discrepancy for asset trading.
         """
-        asset = spatial_opportunity.get("asset")
-        buy_exchange = spatial_opportunity.get("buy_exchange")
-        sell_exchange = spatial_opportunity.get("sell_exchange")
-        amount = spatial_opportunity.get("amount")
-        buy_price = spatial_opportunity.get("buy_price")
-        sell_price = spatial_opportunity.get("sell_price")
-        self.logger.info(f"Executing spatial arbitrage for {asset} between {buy_exchange} (buy) and {sell_exchange} (sell)")
+        asset = spread_opportunity.get("asset")
+        buy_price = spread_opportunity.get("buy_price")
+        sell_price = spread_opportunity.get("sell_price")
+        amount = spread_opportunity.get("amount")
+        self.logger.info(f"Executing spread arbitrage for {asset} with amount {amount} at buy price {buy_price} and sell price {sell_price}")
 
-        # Execute the trade across exchanges
-        success = await self.trade_executor(asset, buy_exchange, sell_exchange, amount, buy_price, sell_price)
+        # Execute the spread trade
+        success = await self.trade_executor(asset, buy_price, sell_price, amount)
         if success:
-            self.logger.info(f"Spatial arbitrage trade succeeded for {asset}")
+            self.logger.info("Spread arbitrage trade succeeded")
         else:
-            self.logger.warning(f"Spatial arbitrage trade failed for {asset}")
+            self.logger.warning("Spread arbitrage trade failed")
 
     # ---------------- Opportunity Handler for Mempool Integration Starts Here ----------------
-    def handle_spatial_arbitrage_opportunity(self, spatial_opportunity: dict):
+    def handle_spread_arbitrage_opportunity(self, spread_opportunity: dict):
         """
-        Responds to detected spatial arbitrage opportunities from MempoolMonitor.
+        Responds to detected spread arbitrage opportunities from MempoolMonitor.
 
         Args:
-        - spatial_opportunity (dict): Opportunity data detected by the MempoolMonitor.
+        - spread_opportunity (dict): Opportunity data detected by the MempoolMonitor.
         """
-        asset = spatial_opportunity.get("asset")
-        buy_exchange = spatial_opportunity.get("buy_exchange")
-        sell_exchange = spatial_opportunity.get("sell_exchange")
-        amount = spatial_opportunity.get("amount")
+        asset = spread_opportunity.get("asset")
+        buy_price = spread_opportunity.get("buy_price")
+        sell_price = spread_opportunity.get("sell_price")
+        amount = spread_opportunity.get("amount")
 
-        self.logger.info(f"Spatial arbitrage opportunity detected for {asset} between {buy_exchange} and {sell_exchange} with amount {amount}")
+        self.logger.info(f"Spread arbitrage opportunity detected for {asset} with buy price {buy_price}, sell price {sell_price}, amount {amount}")
 
-        # Execute spatial arbitrage asynchronously
-        asyncio.create_task(self.execute_spatial_trade(spatial_opportunity))
+        # Execute spread arbitrage asynchronously
+        asyncio.create_task(self.execute_spread_trade(spread_opportunity))
     # ---------------- Opportunity Handler Ends Here ----------------
 
     # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
-    async def request_and_execute_flash_loan(self, amount: float, spatial_opportunity: dict):
+    async def request_and_execute_flash_loan(self, amount: float, spread_opportunity: dict):
         """
-        Requests a flash loan and executes spatial arbitrage if the loan is granted.
+        Requests a flash loan and executes a spread arbitrage trade if the loan is granted.
 
         Args:
         - amount (float): The amount required for the trade.
-        - spatial_opportunity (dict): The trade opportunity to execute with the loan.
+        - spread_opportunity (dict): The trade opportunity to execute with the loan.
         """
-        asset = spatial_opportunity.get("asset")
-        self.logger.info(f"Requesting flash loan of {amount} for spatial arbitrage on {asset}")
+        asset = spread_opportunity.get("asset")
+        self.logger.info(f"Requesting flash loan of {amount} for spread arbitrage on {asset}")
 
-        # Assume flash loan approval; execute spatial trade with flash loan amount
-        await self.execute_spatial_trade(spatial_opportunity)
+        # Assume flash loan approval; execute spread trade with flash loan amount
+        await self.execute_spread_trade(spread_opportunity)
 
     def handle_flash_loan_opportunity(self, opportunity: dict):
         """
@@ -96,9 +94,9 @@ class SpatialArbitrageBot:
         """
         asset = opportunity.get("asset")
         amount = opportunity.get("amount")
-        spatial_opportunity = opportunity.get("spatial_opportunity", {})
+        spread_opportunity = opportunity.get("spread_opportunity", {})
 
-        if spatial_opportunity:
-            self.logger.info(f"Flash loan opportunity detected for spatial arbitrage on {asset} with amount {amount}")
-            asyncio.create_task(self.request_and_execute_flash_loan(amount, spatial_opportunity))
+        if spread_opportunity:
+            self.logger.info(f"Flash loan opportunity detected for spread arbitrage on {asset} with amount {amount}")
+            asyncio.create_task(self.request_and_execute_flash_loan(amount, spread_opportunity))
     # ---------------- Opportunity Handler for Flash Loan Integration Ends Here ----------------

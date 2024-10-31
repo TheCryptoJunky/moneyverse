@@ -6,11 +6,11 @@ from typing import Callable
 
 class VolatilityArbitrageBot:
     """
-    Executes volatility arbitrage by capitalizing on sudden price volatility for a target asset.
+    Executes volatility arbitrage by capitalizing on sudden price spikes or dips for a target asset.
 
     Attributes:
-    - volatility_monitor (Callable): Function to monitor asset volatility.
-    - trade_executor (Callable): Function to execute trades based on volatility opportunities.
+    - volatility_monitor (Callable): Function to monitor asset volatility levels.
+    - trade_executor (Callable): Function to execute trades based on detected volatility opportunities.
     - logger (Logger): Logs volatility arbitrage actions and detected opportunities.
     """
 
@@ -22,21 +22,21 @@ class VolatilityArbitrageBot:
 
     async def monitor_volatility_opportunities(self):
         """
-        Continuously monitors for price volatility across exchanges to detect arbitrage opportunities.
+        Continuously monitors for high-volatility moments in asset prices to detect arbitrage opportunities.
         """
-        self.logger.info("Monitoring volatility for arbitrage opportunities.")
+        self.logger.info("Monitoring asset volatility for arbitrage opportunities.")
         while True:
             volatility_opportunity = await self.volatility_monitor()
             if volatility_opportunity:
                 await self.execute_volatility_trade(volatility_opportunity)
-            await asyncio.sleep(0.5)  # High-frequency monitoring for price volatility
+            await asyncio.sleep(0.5)  # Adjust frequency based on market conditions
 
     async def execute_volatility_trade(self, volatility_opportunity: dict):
         """
-        Executes a volatility-based trade based on a detected price volatility.
+        Executes a trade based on a detected volatility spike or dip.
 
         Args:
-        - volatility_opportunity (dict): Data on the volatility discrepancy for asset trading.
+        - volatility_opportunity (dict): Data on the volatility opportunity for asset trading.
         """
         asset = volatility_opportunity.get("asset")
         buy_price = volatility_opportunity.get("buy_price")
@@ -44,12 +44,12 @@ class VolatilityArbitrageBot:
         amount = volatility_opportunity.get("amount")
         self.logger.info(f"Executing volatility trade for {asset} with amount {amount} at prices {buy_price} and {sell_price}")
 
-        # Execute the trade based on buy and sell signals
+        # Execute trade to capture volatility
         success = await self.trade_executor(asset, buy_price, sell_price, amount)
         if success:
-            self.logger.info(f"Volatility trade succeeded for {asset}")
+            self.logger.info("Volatility trade succeeded")
         else:
-            self.logger.warning(f"Volatility trade failed for {asset}")
+            self.logger.warning("Volatility trade failed")
 
     # ---------------- Opportunity Handler for Mempool Integration Starts Here ----------------
     def handle_volatility_arbitrage_opportunity(self, volatility_opportunity: dict):
@@ -73,7 +73,7 @@ class VolatilityArbitrageBot:
     # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
     async def request_and_execute_flash_loan(self, amount: float, volatility_opportunity: dict):
         """
-        Requests a flash loan and executes a volatility arbitrage trade if the loan is granted.
+        Requests a flash loan and executes a volatility trade if the loan is granted.
 
         Args:
         - amount (float): The amount required for the trade.
@@ -82,7 +82,7 @@ class VolatilityArbitrageBot:
         asset = volatility_opportunity.get("asset")
         self.logger.info(f"Requesting flash loan of {amount} for volatility arbitrage on {asset}")
 
-        # Assume flash loan approval; execute trade with flash loan amount
+        # Assume flash loan approval; execute volatility trade with flash loan amount
         await self.execute_volatility_trade(volatility_opportunity)
 
     def handle_flash_loan_opportunity(self, opportunity: dict):
