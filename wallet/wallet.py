@@ -1,73 +1,105 @@
 import logging
-from decimal import Decimal
-from typing import Dict, Any
-from cryptography.fernet import Fernet  # For encrypting sensitive data
-from database.db_connection import DatabaseConnection
+from typing import Dict
 
 class Wallet:
-    def __init__(self, address: str, recovery_phrase: str, db: DatabaseConnection, key: bytes):
-        """Initialize wallet with address, encrypted recovery phrase, and an empty balance"""
+    """
+    Manages wallet operations, including balance tracking, asset conversion, and strategy assignment.
+
+    Attributes:
+    - address (str): Wallet's blockchain address.
+    - assets (dict): Maps asset type to balance.
+    - strategy (str): Current trading strategy assigned to the wallet.
+    """
+
+    def __init__(self, address: str, initial_assets: Dict[str, float] = None):
         self.address = address
-        self.db = db
-        self.encryption = Fernet(key)
-        self.recovery_phrase = self.encrypt_data(recovery_phrase)
-        self.assets = {}  # {asset_symbol: {"balance": Decimal, "usd_value": Decimal}}
-        self.nfts = []  # List of NFTs with value and metadata
+        self.assets = initial_assets or {}
+        self.strategy = None
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"Wallet initialized for address: {self.address}")
-        self.save_to_db()
+        self.logger.info(f"Initialized wallet {address}.")
 
-    def encrypt_data(self, data: str) -> bytes:
-        """Encrypt sensitive information."""
-        return self.encryption.encrypt(data.encode())
+    def update_balance(self, asset_type: str, amount: float):
+        """
+        Updates the balance for a specified asset type.
 
-    def decrypt_data(self, encrypted_data: bytes) -> str:
-        """Decrypt sensitive information."""
-        return self.encryption.decrypt(encrypted_data).decode()
+        Args:
+        - asset_type (str): Type of asset (e.g., 'BTC', 'ETH').
+        - amount (float): Amount to add or remove.
+        """
+        self.assets[asset_type] = self.assets.get(asset_type, 0.0) + amount
+        self.logger.info(f"Updated balance for {asset_type} in wallet {self.address}: {self.assets[asset_type]}.")
 
-    def add_asset(self, asset_symbol: str, balance: Decimal, usd_value_per_unit: Decimal):
-        """Add or update asset in wallet."""
-        self.assets[asset_symbol] = {
-            "balance": balance,
-            "usd_value": balance * usd_value_per_unit
-        }
-        self.logger.info(f"Updated {asset_symbol} balance to {balance}, USD value {self.assets[asset_symbol]['usd_value']}")
-        self.update_db()
+    def get_balance(self, asset_type: str) -> float:
+        """
+        Retrieves the balance for a specified asset type.
 
-    def add_nft(self, nft_data: Dict[str, Any], value_in_native_token: Decimal, usd_value: Decimal):
-        """Add an NFT with metadata."""
-        self.nfts.append({
-            "data": nft_data,
-            "value_native": value_in_native_token,
-            "usd_value": usd_value
-        })
-        self.logger.info(f"Added NFT with value {usd_value} USD.")
-        self.update_db()
+        Args:
+        - asset_type (str): Type of asset.
 
-    def calculate_total_nav(self) -> Dict[str, Decimal]:
-        """Calculate and return total NAV (Net Asset Value) of the wallet in both tokens and USD."""
-        token_value = sum(asset["balance"] for asset in self.assets.values())
-        usd_value = sum(asset["usd_value"] for asset in self.assets.values())
-        nft_value = sum(nft["usd_value"] for nft in self.nfts)
-        total_nav = usd_value + nft_value
-        return {"token_value": token_value, "usd_value": usd_value, "nft_value": nft_value, "total_nav": total_nav}
+        Returns:
+        - float: Current balance of the asset type.
+        """
+        return self.assets.get(asset_type, 0.0)
 
-    def save_to_db(self):
-        """Save wallet data to the database securely."""
-        encrypted_phrase = self.recovery_phrase
-        wallet_data = {
-            "address": self.address,
-            "recovery_phrase": encrypted_phrase,
-            "assets": self.assets,
-            "nfts": self.nfts
-        }
-        self.db.save_wallet(wallet_data)
+    def calculate_total_value(self, asset_prices: Dict[str, float]) -> float:
+        """
+        Calculates the wallet's total value in USD based on asset prices.
 
-    def update_db(self):
-        """Update wallet data in the database."""
-        nav_data = self.calculate_total_nav()
-        self.db.update_wallet(self.address, self.assets, self.nfts, nav_data)
+        Args:
+        - asset_prices (dict): Maps asset types to their USD values.
 
-    def get_balance(self, asset_symbol: str) -> Decimal:
-        """Retrieve balance of a specific asset."""
-        return self.assets.get(asset_symbol, {}).get("balance", Decimal(0))
+        Returns:
+        - float: Total value of wallet in USD.
+        """
+        total_value = sum(self.get_balance(asset) * asset_prices.get(asset, 0.0) for asset in self.assets)
+        self.logger.info(f"Total value of wallet {self.address} calculated: {total_value} USD.")
+        return total_value
+
+    def assign_strategy(self, strategy: str):
+        """
+        Assigns a trading strategy to the wallet.
+
+        Args:
+        - strategy (str): Name of the strategy to assign.
+        """
+        self.strategy = strategy
+        self.logger.info(f"Strategy {strategy} assigned to wallet {self.address}.")
+
+    def transfer_asset(self, recipient_wallet: 'Wallet', asset_type: str, amount: float) -> bool:
+        """
+        Transfers an asset to another wallet.
+
+        Args:
+        - recipient_wallet (Wallet): Wallet receiving the asset.
+        - asset_type (str): Type of asset to transfer.
+        - amount (float): Amount to transfer.
+
+        Returns:
+        - bool: True if transfer is successful, False otherwise.
+        """
+        if self.get_balance(asset_type) >= amount:
+            self.update_balance(asset_type, -amount)
+            recipient_wallet.update_balance(asset_type, amount)
+            self.logger.info(f"Transferred {amount} {asset_type} from {self.address} to {recipient_wallet.address}.")
+            return True
+        else:
+            self.logger.warning(f"Transfer failed: insufficient {asset_type} balance in wallet {self.address}.")
+            return False
+
+    def swap_asset(self, from_asset: str, to_asset: str, amount: float, conversion_rate: float):
+        """
+        Swaps one asset for another within the wallet.
+
+        Args:
+        - from_asset (str): Asset type to convert from.
+        - to_asset (str): Asset type to convert to.
+        - amount (float): Amount of the from_asset to swap.
+        - conversion_rate (float): Rate to apply for the swap.
+        """
+        if self.get_balance(from_asset) >= amount:
+            self.update_balance(from_asset, -amount)
+            converted_amount = amount * conversion_rate
+            self.update_balance(to_asset, converted_amount)
+            self.logger.info(f"Swapped {amount} {from_asset} to {converted_amount} {to_asset} in wallet {self.address}.")
+        else:
+            self.logger.warning(f"Swap failed: insufficient {from_asset} balance in wallet {self.address}.")
