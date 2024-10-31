@@ -1,40 +1,40 @@
 import logging
-from .reinforcement_learning_agent import ReinforcementAgent
-from .dqn import DQNAgent
+from .reinforcement_learning_agent import ReinforcementLearningAgent
+from .dnn_model import DNNModel
 from .lstm_model import LSTMModel
 from .pgm import PGMModel
 from ..database.db_connection import DatabaseConnection
 
 class AIModel:
     """
-    Central AI model manager that handles dynamic selection and execution of different AI models.
-    
+    Central AI model manager to dynamically manage and deploy different AI models.
+
     Attributes:
-    - db (DatabaseConnection): Database for logging performance.
-    - reinforcement_agent (ReinforcementAgent): Agent for RL-based strategy optimization.
-    - dqn_agent (DQNAgent): Deep Q-Network agent for Q-learning.
+    - db (DatabaseConnection): Database for logging and tracking performance.
+    - rl_agent (ReinforcementLearningAgent): Reinforcement learning agent.
+    - dnn_model (DNNModel): Deep neural network for complex forecasting.
     - lstm_model (LSTMModel): LSTM model for time-series forecasting.
-    - pgm_model (PGMModel): Bayesian Network model for probabilistic reasoning.
+    - pgm_model (PGMModel): Bayesian network for probabilistic reasoning.
     """
 
     def __init__(self, db: DatabaseConnection, state_size: int, action_size: int):
         self.db = db
-        self.reinforcement_agent = ReinforcementAgent()
-        self.dqn_agent = DQNAgent(state_size, action_size, db)
+        self.rl_agent = ReinforcementLearningAgent(state_size, action_size, db)
+        self.dnn_model = DNNModel(input_shape=(state_size,))
         self.lstm_model = LSTMModel(input_shape=(state_size, 1))
         self.pgm_model = PGMModel(db)
         self.logger = logging.getLogger(__name__)
-        self.logger.info("AI Model Manager initialized with RL, DQN, LSTM, and PGM models.")
+        self.logger.info("AI Model manager initialized with RL, DNN, LSTM, and PGM models.")
 
     def select_model(self, market_condition: str):
         """
-        Selects the most suitable model based on the current market condition.
-        
+        Selects the appropriate model based on market conditions.
+
         Args:
-        - market_condition (str): Current market condition ("volatile", "trending", "neutral").
+        - market_condition (str): Current market condition (e.g., "volatile", "trending", "neutral").
         
         Returns:
-        - Object: Selected model instance.
+        - Object: The selected model instance.
         """
         if market_condition == "volatile":
             model = self.pgm_model
@@ -42,30 +42,33 @@ class AIModel:
         elif market_condition == "trending":
             model = self.lstm_model
             self.logger.info("Selected LSTM model for trending conditions.")
+        elif market_condition == "complex_patterns":
+            model = self.dnn_model
+            self.logger.info("Selected DNN model for complex pattern recognition.")
         else:
-            model = self.dqn_agent
-            self.logger.info("Selected DQN model for neutral conditions.")
+            model = self.rl_agent
+            self.logger.info("Selected RL agent for neutral or learning conditions.")
         return model
 
     def execute_model(self, model, data, target=None):
         """
-        Executes the selected model on the provided data.
+        Executes the selected model with the provided data.
 
         Args:
-        - model (Object): Selected model instance.
+        - model (Object): Model to execute.
         - data (np.ndarray): Input data for the model.
-        - target (np.ndarray, optional): Target data for supervised models like LSTM.
+        - target (np.ndarray, optional): Target data for supervised models.
         
         Returns:
-        - Object: Model output or prediction.
+        - Any: Output or prediction of the model.
         """
-        if isinstance(model, DQNAgent):
+        if isinstance(model, ReinforcementLearningAgent):
             action = model.act(data)
-            self.logger.info(f"DQNAgent selected action: {action}")
+            self.logger.info(f"RL Agent selected action: {action}")
             return action
-        elif isinstance(model, LSTMModel):
-            prediction = model.adapt_and_predict(data, target, data)
-            self.logger.info(f"LSTMModel prediction: {prediction}")
+        elif isinstance(model, DNNModel) or isinstance(model, LSTMModel):
+            prediction = model.predict(data)
+            self.logger.info(f"Prediction from {model.__class__.__name__}: {prediction}")
             return prediction
         elif isinstance(model, PGMModel):
             market_trend = data.get("market_trend")
@@ -76,30 +79,30 @@ class AIModel:
 
     def log_model_performance(self, model_type: str, performance: dict):
         """
-        Logs the model performance metrics to the database.
-        
+        Logs performance metrics to the database.
+
         Args:
-        - model_type (str): Type of the model ("DQN", "LSTM", "PGM").
-        - performance (dict): Performance metrics.
+        - model_type (str): Type of model ("RL", "DNN", "LSTM", "PGM").
+        - performance (dict): Performance metrics to log.
         """
         self.db.log_model_performance(model_type, performance)
-        self.logger.info(f"Logged {model_type} performance: {performance}")
+        self.logger.info(f"Logged performance for {model_type}: {performance}")
 
     def apply_best_model(self, market_condition: str, data, target=None):
         """
-        Selects and executes the best model based on current market conditions, logs results.
-        
+        Applies the best model based on the market condition and logs performance.
+
         Args:
         - market_condition (str): Current market condition.
-        - data (np.ndarray): Input data for the model.
-        - target (np.ndarray, optional): Target data for supervised models like LSTM.
-        
+        - data (np.ndarray): Input data.
+        - target (np.ndarray, optional): Target data for supervised models.
+
         Returns:
-        - Object: Model output or prediction.
+        - Any: Output or prediction from the applied model.
         """
         model = self.select_model(market_condition)
         output = self.execute_model(model, data, target)
         performance = {"model_type": model.__class__.__name__, "output": output}
         self.log_model_performance(model.__class__.__name__, performance)
-        self.logger.info(f"Applied best model {model.__class__.__name__} based on {market_condition} market condition.")
+        self.logger.info(f"Applied model {model.__class__.__name__} for {market_condition} conditions.")
         return output
