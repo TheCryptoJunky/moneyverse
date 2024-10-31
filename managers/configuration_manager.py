@@ -1,62 +1,99 @@
-# Full file path: /moneyverse/utils/configuration_manager.py
+# moneyverse/managers/configuration_manager.py
 
-import mysql.connector
-from all_logging.centralized_logger import CentralizedLogger
-
-logger = CentralizedLogger()
+import logging
+from moneyverse.database.db_connection import DatabaseConnection
 
 class ConfigurationManager:
     """
-    Manages configuration parameters stored in the database for dynamic control.
+    Manages configuration settings across strategies, risk, and operational parameters.
+
+    Attributes:
+    - db_connection (DatabaseConnection): Connection to the database for persisting configurations.
+    - logger (Logger): Logs configuration changes and retrieval actions.
     """
 
-    def __init__(self):
-        self.connection_params = {
-            "host": "localhost",
-            "user": "username",
-            "password": "password",
-            "database": "wallet_db"
-        }
+    def __init__(self, db_connection: DatabaseConnection):
+        self.db_connection = db_connection
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("ConfigurationManager initialized with database connection.")
 
-    def get_config(self, key):
-        """Retrieve a configuration value by key."""
-        try:
-            connection = mysql.connector.connect(**self.connection_params)
-            cursor = connection.cursor(dictionary=True)
-            cursor.execute("SELECT config_value FROM configurations WHERE config_key = %s", (key,))
-            result = cursor.fetchone()
-            cursor.close()
-            connection.close()
-            return result["config_value"] if result else None
-        except mysql.connector.Error as e:
-            logger.error(f"Error retrieving configuration for {key}: {e}")
-            return None
+    def set_config(self, key: str, value: float):
+        """
+        Sets a configuration parameter.
 
-    def set_config(self, key, value):
-        """Update or insert a configuration value."""
+        Args:
+        - key (str): Name of the configuration setting.
+        - value (float): Value of the configuration setting.
+        """
         try:
-            connection = mysql.connector.connect(**self.connection_params)
-            cursor = connection.cursor()
-            cursor.execute(
-                "REPLACE INTO configurations (config_key, config_value) VALUES (%s, %s)", 
-                (key, value)
-            )
-            connection.commit()
-            cursor.close()
-            connection.close()
-            logger.info(f"Configuration for {key} set to {value}.")
-        except mysql.connector.Error as e:
-            logger.error(f"Error setting configuration for {key}: {e}")
+            self.db_connection.update_configuration(key, value)
+            self.logger.info(f"Set configuration '{key}' to {value}")
+        except Exception as e:
+            self.logger.error(f"Failed to set configuration '{key}': {str(e)}")
 
-    def delete_config(self, key):
-        """Delete a configuration by key."""
+    def get_config(self, key: str) -> float:
+        """
+        Retrieves the value of a configuration parameter.
+
+        Args:
+        - key (str): Name of the configuration setting.
+
+        Returns:
+        - float: Value of the configuration setting.
+        """
         try:
-            connection = mysql.connector.connect(**self.connection_params)
-            cursor = connection.cursor()
-            cursor.execute("DELETE FROM configurations WHERE config_key = %s", (key,))
-            connection.commit()
-            cursor.close()
-            connection.close()
-            logger.info(f"Configuration for {key} deleted.")
-        except mysql.connector.Error as e:
-            logger.error(f"Error deleting configuration for {key}: {e}")
+            value = self.db_connection.fetch_configuration(key)
+            self.logger.info(f"Retrieved configuration '{key}': {value}")
+            return value
+        except Exception as e:
+            self.logger.error(f"Failed to retrieve configuration '{key}': {str(e)}")
+            return 0.0
+
+    def update_risk_limits(self, max_risk_per_trade: float, max_daily_loss: float):
+        """
+        Updates risk limits and persists them in the database.
+
+        Args:
+        - max_risk_per_trade (float): Maximum allowed risk per trade.
+        - max_daily_loss (float): Maximum allowed daily loss as a percentage.
+        """
+        self.set_config("max_risk_per_trade", max_risk_per_trade)
+        self.set_config("max_daily_loss", max_daily_loss)
+        self.logger.info("Updated risk limits.")
+
+    def update_trade_parameters(self, trade_frequency: int, profit_target: float):
+        """
+        Updates trade parameters such as trade frequency and profit target.
+
+        Args:
+        - trade_frequency (int): Desired frequency of trades.
+        - profit_target (float): Targeted profit percentage.
+        """
+        self.set_config("trade_frequency", trade_frequency)
+        self.set_config("profit_target", profit_target)
+        self.logger.info("Updated trade parameters.")
+
+    def load_all_configurations(self) -> dict:
+        """
+        Loads all configurations from the database.
+
+        Returns:
+        - dict: Dictionary containing all configuration settings.
+        """
+        try:
+            configurations = self.db_connection.fetch_all_configurations()
+            self.logger.info("Loaded all configurations.")
+            return configurations
+        except Exception as e:
+            self.logger.error("Failed to load configurations: " + str(e))
+            return {}
+
+    def reset_configurations(self):
+        """
+        Resets all configurations to default values.
+        """
+        try:
+            self.db_connection.reset_configurations()
+            self.logger.info("All configurations reset to default values.")
+        except Exception as e:
+            self.logger.error("Failed to reset configurations: " + str(e))

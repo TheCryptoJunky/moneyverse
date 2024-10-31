@@ -1,97 +1,107 @@
-# Full file path: /moneyverse/managers/risk_manager.py
+# moneyverse/managers/risk_manager.py
 
-import asyncio
-from centralized_logger import CentralizedLogger
-from src.safety.circuit_breaker import CircuitBreaker
-from src.safety.reorg_detection import ReorgDetection
-from src.utils.error_handler import handle_errors
-from src.list_manager import ListManager
-
-logger = CentralizedLogger()
-circuit_breaker = CircuitBreaker()
-reorg_detection = ReorgDetection()
-list_manager = ListManager()
+import logging
+from typing import Dict
 
 class RiskManager:
     """
-    Manages risk parameters for trading bots, monitoring and adjusting based on real-time data.
+    Monitors risk on a per-trade and portfolio basis, enforcing limits to prevent extreme losses.
+
+    Attributes:
+    - max_risk_per_trade (float): Maximum risk allowed per trade as a percentage of the portfolio.
+    - max_portfolio_drawdown (float): Maximum allowable portfolio drawdown as a percentage.
+    - max_daily_loss (float): Maximum allowable daily loss as a percentage of the portfolio.
+    - current_drawdown (float): Current portfolio drawdown.
+    - logger (Logger): Logs risk monitoring actions and enforcements.
     """
 
-    def __init__(self):
-        self.risk_thresholds = {
-            "volatility": 0.05,       # Maximum allowed volatility
-            "drawdown_limit": 0.1,    # Maximum drawdown limit
-            "position_size": 0.02     # Maximum position size as a percentage
-        }
+    def __init__(self, max_risk_per_trade=0.02, max_portfolio_drawdown=0.10, max_daily_loss=0.05):
+        self.max_risk_per_trade = max_risk_per_trade  # 2% per trade
+        self.max_portfolio_drawdown = max_portfolio_drawdown  # 10% drawdown limit
+        self.max_daily_loss = max_daily_loss  # 5% daily loss limit
+        self.current_drawdown = 0.0
+        self.daily_loss = 0.0
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("RiskManager initialized with risk limits.")
 
-    async def monitor_risks(self):
+    def calculate_trade_risk(self, trade_value: float, portfolio_value: float) -> float:
         """
-        Continuously monitor risk factors and make adjustments to bot activity based on thresholds.
-        """
-        logger.log("info", "Risk management monitoring started.")
-        try:
-            while True:
-                # Fetch real-time market conditions
-                market_conditions = await self.fetch_market_conditions()
+        Calculates the risk for a given trade as a percentage of the portfolio.
 
-                # Check for circuit breaker activation
-                if circuit_breaker.is_triggered():
-                    logger.log("warning", "Circuit breaker triggered. Halting all bots.")
-                    self.stop_bots()
-                    continue
+        Args:
+        - trade_value (float): Value of the trade.
+        - portfolio_value (float): Total portfolio value.
 
-                # Detect blockchain reorg risks
-                if reorg_detection.is_reorg_detected():
-                    logger.log("warning", "Blockchain reorg detected. Pausing bots.")
-                    self.pause_bots()
-                    continue
+        Returns:
+        - float: Risk percentage of the trade.
+        """
+        trade_risk = trade_value / portfolio_value
+        self.logger.debug(f"Calculated trade risk: {trade_risk:.2%}")
+        return trade_risk
 
-                # Evaluate if risk thresholds are exceeded
-                if self.is_risk_exceeded(market_conditions):
-                    logger.log("warning", "Risk thresholds exceeded. Adjusting bot activity.")
-                    self.adjust_bot_activity(market_conditions)
+    def check_trade_risk(self, trade_value: float, portfolio_value: float) -> bool:
+        """
+        Checks if a trade's risk exceeds the maximum allowable per trade.
 
-                await asyncio.sleep(30)  # Interval for checking risks
+        Args:
+        - trade_value (float): Value of the trade.
+        - portfolio_value (float): Total portfolio value.
 
-        except Exception as e:
-            logger.log("error", f"Error in risk monitoring: {e}")
-            handle_errors(e)
+        Returns:
+        - bool: True if trade risk is within limits, False otherwise.
+        """
+        trade_risk = self.calculate_trade_risk(trade_value, portfolio_value)
+        if trade_risk > self.max_risk_per_trade:
+            self.logger.warning(f"Trade risk exceeds limit: {trade_risk:.2%} > {self.max_risk_per_trade:.2%}")
+            return False
+        return True
 
-    def is_risk_exceeded(self, market_conditions):
+    def update_drawdown(self, portfolio_value: float, peak_value: float):
         """
-        Determines if any current market condition exceeds defined risk thresholds.
-        """
-        volatility = market_conditions.get("volatility")
-        position_size = market_conditions.get("position_size")
+        Updates the portfolio's current drawdown.
 
-        if volatility > self.risk_thresholds["volatility"]:
-            return True
-        if position_size > self.risk_thresholds["position_size"]:
-            return True
-        return False
+        Args:
+        - portfolio_value (float): Current portfolio value.
+        - peak_value (float): Peak portfolio value before the drawdown.
+        """
+        self.current_drawdown = (peak_value - portfolio_value) / peak_value
+        if self.current_drawdown > self.max_portfolio_drawdown:
+            self.logger.warning(f"Portfolio drawdown exceeds limit: {self.current_drawdown:.2%} > {self.max_portfolio_drawdown:.2%}")
+        else:
+            self.logger.debug(f"Current drawdown: {self.current_drawdown:.2%}")
 
-    async def fetch_market_conditions(self):
+    def check_daily_loss_limit(self, daily_loss: float, portfolio_value: float) -> bool:
         """
-        Fetch current market conditions such as volatility and position size.
-        """
-        await asyncio.sleep(1)  # Simulating an API call delay
-        return {"volatility": 0.03, "position_size": 0.01}  # Sample data; replace with actual API call
+        Checks if the daily loss exceeds the maximum allowable loss.
 
-    def adjust_bot_activity(self, market_conditions):
-        """
-        Adjusts bot operations based on current risk levels.
-        """
-        logger.log("info", "Adjusting bot activity due to risk level.")
-        # Logic to adjust bots (e.g., reduce trade sizes or halt specific bots)
+        Args:
+        - daily_loss (float): Current daily loss.
+        - portfolio_value (float): Total portfolio value.
 
-    def stop_bots(self):
+        Returns:
+        - bool: True if daily loss is within limits, False otherwise.
         """
-        Immediately stop all bot operations due to critical risk.
-        """
-        logger.log("critical", "All bots stopped due to critical risk event.")
+        loss_percentage = daily_loss / portfolio_value
+        if loss_percentage > self.max_daily_loss:
+            self.logger.warning(f"Daily loss limit exceeded: {loss_percentage:.2%} > {self.max_daily_loss:.2%}")
+            return False
+        return True
 
-    def pause_bots(self):
+    def enforce_risk_limits(self, wallet, portfolio_value: float, peak_value: float, daily_loss: float):
         """
-        Temporarily pause bots due to a transient risk event.
+        Enforces risk limits by monitoring drawdown and daily loss limits.
+
+        Args:
+        - wallet (Wallet): Wallet instance to manage asset liquidation if needed.
+        - portfolio_value (float): Current portfolio value.
+        - peak_value (float): Peak portfolio value for drawdown calculations.
+        - daily_loss (float): Current daily loss.
         """
-        logger.log("warning", "Bots paused due to transient risk.")
+        self.update_drawdown(portfolio_value, peak_value)
+        if not self.check_daily_loss_limit(daily_loss, portfolio_value):
+            self.logger.info("Daily loss limit exceeded. Pausing trades.")
+            # Implement logic to pause trading here.
+
+        if self.current_drawdown > self.max_portfolio_drawdown:
+            self.logger.info("Drawdown limit exceeded. Triggering partial liquidation.")
+            # Implement logic for partial liquidation if drawdown exceeds limit.

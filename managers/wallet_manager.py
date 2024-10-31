@@ -1,84 +1,121 @@
+# moneyverse/managers/wallet_manager.py
+
 import logging
-from typing import List, Dict
-from cryptography.fernet import Fernet  # For encryption of sensitive data
-from ..wallet.wallet import Wallet
-from ..database.db_connection import DatabaseConnection
+from typing import Dict, Optional
 
 class WalletManager:
     """
-    Manages wallets, including their initialization, asset balancing, and secure storage.
+    Manages wallets and assets, updates balances, and handles multi-chain operations.
 
     Attributes:
-    - db (DatabaseConnection): Database connection instance for storage.
-    - encryption_key (bytes): Key for encrypting sensitive wallet information.
-    - wallets (Dict[str, Wallet]): Active wallets managed by this manager.
+    - wallets (dict): Dictionary to store wallet addresses and associated assets.
+    - logger (Logger): Logs actions related to wallet management.
     """
 
-    def __init__(self, db: DatabaseConnection, encryption_key: bytes):
-        self.db = db
-        self.encryption = Fernet(encryption_key)
-        self.wallets = {}
+    def __init__(self):
+        self.wallets = {}  # Stores wallets with asset balances per chain
         self.logger = logging.getLogger(__name__)
+        self.logger.info("WalletManager initialized with empty wallets.")
 
-    def register_wallet(self, wallet: Wallet):
+    def add_wallet(self, address: str, initial_balances: Optional[Dict[str, float]] = None):
         """
-        Registers a new wallet, storing it securely in the database.
-        
+        Adds a new wallet with optional initial balances.
+
         Args:
-        - wallet (Wallet): Wallet instance to register.
+        - address (str): Wallet address.
+        - initial_balances (dict): Initial asset balances, keyed by asset type.
         """
-        encrypted_phrase = self.encrypt(wallet.recovery_phrase)
-        self.wallets[wallet.address] = wallet
-        self.db.save_wallet({
-            "address": wallet.address,
-            "recovery_phrase": encrypted_phrase,
-            "initial_balance": wallet.get_balance(),
-        })
-        self.logger.info(f"Registered wallet {wallet.address} with initial balance {wallet.get_balance()}.")
+        self.wallets[address] = initial_balances or {}
+        self.logger.info(f"Added new wallet {address} with balances: {self.wallets[address]}")
 
-    def encrypt(self, data: str) -> bytes:
-        """Encrypts sensitive data."""
-        return self.encryption.encrypt(data.encode())
-
-    def decrypt(self, encrypted_data: bytes) -> str:
-        """Decrypts sensitive data."""
-        return self.encryption.decrypt(encrypted_data).decode()
-
-    def redistribute_assets(self, target_wallet: Wallet, amount: float):
+    def remove_wallet(self, address: str):
         """
-        Rebalances assets by transferring the specified amount to the target wallet.
-        
+        Removes a wallet from management.
+
         Args:
-        - target_wallet (Wallet): Wallet to receive the assets.
-        - amount (float): Amount to adjust.
+        - address (str): Wallet address to remove.
         """
-        # Placeholder for actual transfer logic
-        current_balance = target_wallet.get_balance()
-        target_wallet.update_balance(current_balance + amount)
-        self.db.update_wallet_balance(target_wallet.address, target_wallet.get_balance())
-        self.logger.info(f"Redistributed {amount} to wallet {target_wallet.address}. New balance: {target_wallet.get_balance()}")
+        if address in self.wallets:
+            del self.wallets[address]
+            self.logger.info(f"Removed wallet {address}")
+        else:
+            self.logger.warning(f"Attempted to remove non-existent wallet {address}")
 
-    def get_wallets(self) -> List[Wallet]:
+    def update_balance(self, address: str, asset: str, amount: float):
         """
-        Retrieves all active wallets managed by this manager.
-        
+        Updates the balance of a specified asset within a wallet.
+
+        Args:
+        - address (str): Wallet address.
+        - asset (str): Asset type (e.g., "ETH", "BTC").
+        - amount (float): Amount to add (positive) or subtract (negative).
+        """
+        if address not in self.wallets:
+            self.logger.error(f"Wallet {address} does not exist.")
+            return
+
+        if asset in self.wallets[address]:
+            self.wallets[address][asset] += amount
+        else:
+            self.wallets[address][asset] = amount
+        self.logger.info(f"Updated balance for {asset} in wallet {address}: {self.wallets[address][asset]}")
+
+    def get_balance(self, address: str, asset: str) -> Optional[float]:
+        """
+        Retrieves the balance of a specified asset in a wallet.
+
+        Args:
+        - address (str): Wallet address.
+        - asset (str): Asset type to retrieve balance for.
+
         Returns:
-        - list: All wallet instances.
+        - float: Balance of the specified asset, or None if wallet/asset not found.
         """
-        return list(self.wallets.values())
-    
-    def secure_retrieve_wallet(self, address: str) -> Wallet:
+        if address in self.wallets and asset in self.wallets[address]:
+            balance = self.wallets[address][asset]
+            self.logger.debug(f"Balance for {asset} in wallet {address}: {balance}")
+            return balance
+        self.logger.warning(f"Balance for {asset} in wallet {address} not found.")
+        return None
+
+    def list_wallets(self) -> Dict[str, Dict[str, float]]:
         """
-        Retrieves a wallet by address, decrypting sensitive information.
-        
-        Args:
-        - address (str): Wallet address to retrieve.
-        
+        Lists all wallets and their balances.
+
         Returns:
-        - Wallet: The decrypted wallet instance.
+        - dict: Dictionary of wallets with their balances.
         """
-        encrypted_data = self.db.get_wallet_data(address)
-        recovery_phrase = self.decrypt(encrypted_data["recovery_phrase"])
-        wallet = Wallet(address=address, recovery_phrase=recovery_phrase)
-        self.logger.info(f"Retrieved wallet {address} securely.")
-        return wallet
+        self.logger.info("Listing all wallets and balances.")
+        return self.wallets
+
+    def transfer_asset(self, from_address: str, to_address: str, asset: str, amount: float):
+        """
+        Transfers an asset from one wallet to another.
+
+        Args:
+        - from_address (str): Source wallet address.
+        - to_address (str): Destination wallet address.
+        - asset (str): Asset type to transfer.
+        - amount (float): Amount to transfer.
+        """
+        if from_address not in self.wallets or to_address not in self.wallets:
+            self.logger.error(f"One or both wallets not found for transfer: {from_address} to {to_address}")
+            return
+
+        if self.get_balance(from_address, asset) >= amount:
+            self.update_balance(from_address, asset, -amount)
+            self.update_balance(to_address, asset, amount)
+            self.logger.info(f"Transferred {amount} {asset} from {from_address} to {to_address}.")
+        else:
+            self.logger.warning(f"Insufficient funds in {from_address} for transfer of {amount} {asset}.")
+
+    def initialize_wallets(self, wallet_data: Dict[str, Dict[str, float]]):
+        """
+        Bulk initializes wallets with data, helpful for setting up multiple wallets at once.
+
+        Args:
+        - wallet_data (dict): Dictionary of wallet addresses and initial balances.
+        """
+        for address, balances in wallet_data.items():
+            self.add_wallet(address, balances)
+        self.logger.info("Bulk wallet initialization complete.")
