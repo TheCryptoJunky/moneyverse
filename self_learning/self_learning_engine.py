@@ -1,81 +1,104 @@
 # moneyverse/self_learning/self_learning_engine.py
 
 import logging
+from typing import Dict, Callable
 import numpy as np
-from moneyverse.algorithms.rl_agent import RLAgent
-from moneyverse.algorithms.replay_buffer import ReplayBuffer
-from moneyverse.database.db_connection import DatabaseConnection
 
 class SelfLearningEngine:
     """
-    Self-learning engine for reinforcement learning-driven strategy improvement.
+    Facilitates self-learning for optimization of strategies through reinforcement learning (RL).
 
     Attributes:
-    - agent (RLAgent): The reinforcement learning agent responsible for policy optimization.
-    - replay_buffer (ReplayBuffer): Stores experiences for training.
-    - db (DatabaseConnection): Connection for logging learning progress.
-    - logger (Logger): Tracks learning events and performance metrics.
+    - strategies (dict): Registered strategies with their associated reward functions.
+    - learning_rate (float): Controls the weight of updates in the Q-learning algorithm.
+    - discount_factor (float): Discount factor for future rewards in RL.
+    - q_table (dict): Q-learning table storing values for state-action pairs.
+    - logger (Logger): Logs learning process and adjustments.
     """
 
-    def __init__(self, agent: RLAgent, db: DatabaseConnection, buffer_size=2000):
-        self.agent = agent
-        self.replay_buffer = ReplayBuffer(max_size=buffer_size)
-        self.db = db
+    def __init__(self, learning_rate=0.1, discount_factor=0.9):
+        self.learning_rate = learning_rate
+        self.discount_factor = discount_factor
+        self.q_table = {}  # {(state, action): q_value}
+        self.strategies = {}  # {strategy_name: reward_function}
         self.logger = logging.getLogger(__name__)
-        self.logger.info("SelfLearningEngine initialized.")
+        self.logger.info("SelfLearningEngine initialized with Q-learning parameters.")
 
-    def store_experience(self, state, action, reward, next_state, done):
+    def register_strategy(self, strategy_name: str, reward_function: Callable):
         """
-        Stores an experience tuple in the replay buffer.
+        Registers a strategy with its reward function to the self-learning engine.
 
         Args:
-        - state (np.ndarray): Current state.
-        - action (int): Action taken.
-        - reward (float): Reward received.
-        - next_state (np.ndarray): Next state observed.
-        - done (bool): Whether the episode ended.
+        - strategy_name (str): Name of the strategy.
+        - reward_function (callable): Function that calculates reward based on performance metrics.
         """
-        experience = (state, action, reward, next_state, done)
-        self.replay_buffer.store(experience)
-        self.logger.debug("Stored experience in replay buffer.")
+        self.strategies[strategy_name] = reward_function
+        self.logger.info(f"Registered strategy {strategy_name} with self-learning engine.")
 
-    def train_from_replay(self, batch_size=32):
+    def calculate_reward(self, strategy_name: str, state: str) -> float:
         """
-        Samples experiences and trains the agent using the replay buffer.
+        Calculates the reward for a strategy based on the provided reward function.
 
         Args:
-        - batch_size (int): Number of experiences to sample for each training step.
-        """
-        if len(self.replay_buffer) < batch_size:
-            self.logger.warning("Not enough samples in replay buffer to train.")
-            return
+        - strategy_name (str): Name of the strategy.
+        - state (str): Current state of the strategy.
 
-        batch = self.replay_buffer.sample(batch_size)
-        loss = self.agent.update_policy(batch)
-        self.logger.info(f"Training step completed. Policy loss: {loss}")
-
-    def log_performance(self, performance_metric: float):
+        Returns:
+        - float: Calculated reward based on the strategy's performance.
         """
-        Logs the agent's performance to the database for long-term analysis.
+        reward_func = self.strategies.get(strategy_name)
+        if not reward_func:
+            self.logger.warning(f"No reward function found for strategy {strategy_name}")
+            return 0.0
+        reward = reward_func(state)
+        self.logger.debug(f"Reward for {strategy_name} in state {state}: {reward}")
+        return reward
 
-        Args:
-        - performance_metric (float): The current performance score of the agent.
+    def update_q_table(self, state: str, action: str, reward: float, next_state: str):
         """
-        self.db.log_model_performance("RLAgent", performance_metric)
-        self.logger.info(f"Logged RL agent performance: {performance_metric}")
-
-    def adapt_strategy(self, market_condition: str):
-        """
-        Adjusts the agent’s behavior based on the current market condition.
+        Updates the Q-table using the Q-learning algorithm.
 
         Args:
-        - market_condition (str): The current observed market condition.
+        - state (str): The current state.
+        - action (str): The action taken.
+        - reward (float): Reward received after taking the action.
+        - next_state (str): The resulting state after the action.
         """
-        if market_condition == "volatile":
-            self.agent.adjust_exploration_rate(0.3)
-        elif market_condition == "stable":
-            self.agent.adjust_exploration_rate(0.1)
+        current_q = self.q_table.get((state, action), 0.0)
+        max_future_q = max([self.q_table.get((next_state, a), 0.0) for a in self.strategies.keys()], default=0.0)
+        new_q = current_q + self.learning_rate * (reward + self.discount_factor * max_future_q - current_q)
+        self.q_table[(state, action)] = new_q
+        self.logger.info(f"Updated Q-value for state-action ({state}, {action}): {new_q}")
+
+    def select_action(self, state: str, epsilon: float = 0.1) -> str:
+        """
+        Selects the next action based on an epsilon-greedy policy.
+
+        Args:
+        - state (str): The current state.
+        - epsilon (float): Probability of choosing a random action (exploration rate).
+
+        Returns:
+        - str: The selected strategy name to execute.
+        """
+        if np.random.rand() < epsilon:
+            action = np.random.choice(list(self.strategies.keys()))
+            self.logger.debug(f"Exploratory action selected: {action}")
         else:
-            self.agent.adjust_exploration_rate(0.2)
+            q_values = {action: self.q_table.get((state, action), 0.0) for action in self.strategies.keys()}
+            action = max(q_values, key=q_values.get)
+            self.logger.debug(f"Best action selected: {action} with Q-value {q_values[action]}")
+        return action
 
-        self.logger.info(f"Adapted strategy for market condition: {market_condition}")
+    def optimize_strategy(self, strategy_name: str, state: str, next_state: str):
+        """
+        Runs the Q-learning optimization process for a strategy.
+
+        Args:
+        - strategy_name (str): Name of the strategy being optimized.
+        - state (str): Current state of the strategy.
+        - next_state (str): Next state after executing the strategy.
+        """
+        reward = self.calculate_reward(strategy_name, state)
+        self.update_q_table(state, strategy_name, reward, next_state)
+        self.logger.info(f"Optimized strategy {strategy_name} for transition {state} -> {next_state}")

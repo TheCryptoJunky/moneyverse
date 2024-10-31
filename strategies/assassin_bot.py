@@ -1,122 +1,110 @@
-# Full file path: /moneyverse/strategies/assassin_bot.py
+# moneyverse/strategies/assassin_bot.py
 
-import asyncio
-from ai.agents.rl_agent import RLTradingAgent
-from centralized_logger import CentralizedLogger
-from src.managers.transaction_manager import TransactionManager
-from src.managers.risk_manager import RiskManager
-from market_data import MarketDataAPI
-from src.utils.error_handler import handle_errors
-from ai.rl_algorithms import DDPGAgent, PPOAgent, LSTM_MemoryAgent, MARLAgent
-
-# Initialize components
-logger = CentralizedLogger()
-transaction_manager = TransactionManager()
-risk_manager = RiskManager()
-market_data_api = MarketDataAPI()
-
-# Initialize multiple RL agents for dynamic selection, including memory-based LSTM
-ddpg_agent = DDPGAgent(environment="assassin_trading")
-ppo_agent = PPOAgent(environment="assassin_trading")
-lstm_agent = LSTM_MemoryAgent(environment="assassin_trading")
-marl_agent = MARLAgent(environment="assassin_trading")
-
-# Track performance for each agent
-agent_performance = {"DDPG": 0, "PPO": 0, "LSTM": 0, "MARL": 0}
+import logging
+from typing import Dict, Callable, Optional
+import numpy as np
+import time
 
 class AssassinBot:
-    def __init__(self):
-        self.running = True
-        self.rl_agent = None
-        self.select_agent()  # Initialize with best performing agent
+    """
+    Targets vulnerable trades by analyzing market anomalies and executing or alerting for profitable actions.
 
-    def select_agent(self):
-        """Select the best-performing agent based on recent trade performance."""
-        best_agent_name = max(agent_performance, key=agent_performance.get)
-        self.rl_agent = {
-            "DDPG": ddpg_agent,
-            "PPO": ppo_agent,
-            "LSTM": lstm_agent,
-            "MARL": marl_agent,
-        }[best_agent_name]
-        logger.log_info(f"Selected agent: {best_agent_name}")
+    Attributes:
+    - historical_data (dict): Stores historical trade data for analysis.
+    - anomaly_threshold (float): Threshold to trigger action based on detected anomalies.
+    - logger (Logger): Logs detection, action execution, and alerts to managers.
+    - alert_manager (callable): Function to alert relevant managers of detected anomalies.
+    - execute_order_func (callable): Function to execute specific trade orders.
+    """
 
-    async def fetch_market_data(self):
-        """Fetch market data for assassin trading opportunities."""
-        try:
-            market_data = await market_data_api.get_assassin_data()
-            logger.log_info(f"Fetched market data: {market_data}")
-            return market_data
-        except Exception as e:
-            logger.log_error(f"Failed to fetch market data: {e}")
-            handle_errors(e)
-            return None
+    def __init__(self, anomaly_threshold=0.05, data_fetcher: Callable = None,
+                 alert_manager: Optional[Callable] = None, execute_order_func: Optional[Callable] = None):
+        self.historical_data = {}  # {trade_id: trade_data}
+        self.anomaly_threshold = anomaly_threshold
+        self.data_fetcher = data_fetcher  # Function to fetch real-time trade data
+        self.alert_manager = alert_manager  # Function to alert managers
+        self.execute_order_func = execute_order_func  # Function to execute trade orders
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"AssassinBot initialized with anomaly threshold: {self.anomaly_threshold}")
 
-    def ai_decision(self, market_data):
-        """Make an AI-driven trading decision using the selected RL agent."""
-        try:
-            action = self.rl_agent.decide_action(market_data)
-            logger.log_info(f"AI decision by {self.rl_agent.__class__.__name__}: {action}")
-            return action
-        except Exception as e:
-            logger.log_error(f"Error in AI decision-making: {e}")
-            handle_errors(e)
-            return None
+    def load_historical_data(self, data: Dict[str, Dict[str, float]]):
+        """
+        Loads historical data for trade pattern analysis.
 
-    async def execute_trade(self, trade_data):
-        """Execute trade and update agent performance based on success or failure."""
-        trade_success = await transaction_manager.execute_trade(trade_data)
-        agent_type = self.rl_agent.__class__.__name__
+        Args:
+        - data (dict): Historical trade data, keyed by trade IDs.
+        """
+        self.historical_data.update(data)
+        self.logger.info(f"Loaded historical data for {len(data)} trades.")
 
-        if trade_success:
-            logger.log_info(f"Trade executed successfully: {trade_data}")
-            agent_performance[agent_type] += 1  # Reward successful trade
-        else:
-            logger.log_warning(f"Trade failed: {trade_data}")
-            agent_performance[agent_type] -= 1  # Penalize failed trade
+    def detect_anomalies(self, trade_data: Dict[str, float]) -> bool:
+        """
+        Detects anomalies in the incoming trade data by comparing with historical data.
 
-    async def run(self):
-        """Main loop to operate the assassin bot with dynamic agent switching."""
-        logger.log_info("Starting Assassin Bot with dynamic agent selection...")
-        try:
-            while self.running:
-                # Re-evaluate and select best-performing agent
-                if max(agent_performance.values()) != agent_performance[self.rl_agent.__class__.__name__]:
-                    self.select_agent()
+        Args:
+        - trade_data (dict): Data for the trade to be analyzed.
 
-                market_data = await self.fetch_market_data()
-                if market_data is None:
-                    logger.log_warning("No market data available; retrying in 30 seconds.")
-                    await asyncio.sleep(30)
-                    continue
+        Returns:
+        - bool: True if an anomaly is detected, False otherwise.
+        """
+        if not self.historical_data:
+            self.logger.warning("No historical data available for anomaly detection.")
+            return False
 
-                action = self.ai_decision(market_data)
-                if action is None:
-                    logger.log_warning("AI decision failed; retrying in 30 seconds.")
-                    await asyncio.sleep(30)
-                    continue
+        # Calculate deviation based on historical averages
+        trade_type = trade_data.get("type")
+        historical_avg = np.mean([data["price"] for data in self.historical_data.values() if data["type"] == trade_type])
+        deviation = abs(trade_data["price"] - historical_avg) / historical_avg
 
-                if risk_manager.is_risk_compliant(market_data):
-                    trade_data = {
-                        "source_wallet": action.get("source_wallet"),
-                        "amount": action.get("amount"),
-                        "trade_type": "assassin"
-                    }
-                    await self.execute_trade(trade_data)
-                else:
-                    logger.log_warning("Risk thresholds exceeded. Skipping trade execution.")
+        if deviation >= self.anomaly_threshold:
+            self.logger.info(f"Anomaly detected in trade {trade_data.get('trade_id')}: deviation of {deviation:.2%}")
+            return True
+        return False
 
-                await asyncio.sleep(30)  # Adjust as needed for desired frequency
+    def execute_action(self, trade_data: Dict[str, float]):
+        """
+        Executes a specified action or alerts managers based on the detected anomaly.
 
-        except Exception as e:
-            logger.log_error(f"Critical error in Assassin Bot: {e}")
-            handle_errors(e)
+        Args:
+        - trade_data (dict): Data for the trade to be exploited.
+        """
+        trade_id = trade_data.get("trade_id")
+        action = trade_data.get("action", "default")
+        
+        # Send alert to managers if function is provided
+        if self.alert_manager:
+            self.alert_manager(f"Alert: Anomaly detected in trade {trade_id} with action: {action}")
+            self.logger.info(f"Alert sent to manager for trade {trade_id} anomaly.")
 
-    def stop(self):
-        """Stops the assassin bot."""
-        logger.log_info("Stopping Assassin Bot...")
-        self.running = False
+        # Execute specific order if function is provided
+        if self.execute_order_func:
+            success = self.execute_order_func(trade_data)
+            if success:
+                self.logger.info(f"Executed order for trade {trade_id} as per detected anomaly.")
+            else:
+                self.logger.warning(f"Order execution failed for trade {trade_id}")
 
-if __name__ == "__main__":
-    bot = AssassinBot()
-    asyncio.run(bot.run())
+    def run_monitoring(self, interval: float = 1.0):
+        """
+        Continuously monitors trades for anomalies and takes action if any are detected.
+
+        Args:
+        - interval (float): Time interval between checks in seconds.
+        """
+        self.logger.info("Starting continuous monitoring for trade anomalies.")
+        while True:
+            if self.data_fetcher:
+                trade_data = self.data_fetcher()  # Fetch real-time trade data
+                if self.detect_anomalies(trade_data):
+                    self.execute_action(trade_data)
+            time.sleep(interval)
+
+    def set_anomaly_threshold(self, new_threshold: float):
+        """
+        Adjusts the anomaly detection threshold.
+
+        Args:
+        - new_threshold (float): New threshold value for detecting anomalies.
+        """
+        self.anomaly_threshold = new_threshold
+        self.logger.info(f"Anomaly threshold set to {new_threshold}")
