@@ -1,202 +1,84 @@
-# Full file path: /moneyverse/strategies/protection.py
+# moneyverse/strategies/protection.py
 
-from centralized_logger import CentralizedLogger
-from web3 import Web3
-import os
+import logging
+import asyncio
+from typing import Callable
 
-# Initialize Web3 connection
-web3 = Web3(Web3.HTTPProvider(os.getenv("WEB3_PROVIDER")))
-logger = CentralizedLogger()
+class ProtectionBot:
+    """
+    Executes protection strategies to mitigate potential losses or hedge against adverse conditions.
 
-def activate_partner_protection(partner_entry, attack_types):
+    Attributes:
+    - risk_monitor (Callable): Function to monitor market conditions for potential risks.
+    - hedge_executor (Callable): Function to execute protective or hedging trades.
+    - logger (Logger): Logs protection actions and detected risk events.
     """
-    Activates protection strategies for a specified partner entry.
-    """
-    logger.log_info(f"Activating protection for partner entry: {partner_entry}")
-    success = True
-    try:
-        for attack_type in attack_types:
-            if attack_type == "counter_sandwich":
-                result = perform_counter_sandwich(partner_entry)
-            elif attack_type == "front_run":
-                result = perform_front_run(partner_entry)
-            elif attack_type == "back_run":
-                result = perform_back_run(partner_entry)
-            elif attack_type == "liquidity_drain":
-                result = perform_liquidity_drain(partner_entry)
-            else:
-                logger.log_warning(f"Unknown protection strategy: {attack_type}")
-                continue
 
-            if result:
-                logger.log_info(f"{attack_type.capitalize()} strategy executed successfully for {partner_entry}")
-            else:
-                logger.log_warning(f"{attack_type.capitalize()} strategy failed for {partner_entry}")
-                success = False
-    except Exception as e:
-        logger.log_error(f"Failed to activate protection for {partner_entry}: {e}")
-        success = False
+    def __init__(self, risk_monitor: Callable, hedge_executor: Callable):
+        self.risk_monitor = risk_monitor
+        self.hedge_executor = hedge_executor
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("ProtectionBot initialized.")
 
-    return success
+    async def monitor_risks(self):
+        """
+        Continuously monitors market conditions for risk indicators.
+        """
+        self.logger.info("Monitoring market conditions for protection opportunities.")
+        while True:
+            risk_event = await self.risk_monitor()
+            if risk_event:
+                await self.execute_protection_action(risk_event)
+            await asyncio.sleep(0.5)  # Set for frequent risk checks
 
-# --- MEV Protection Strategies with Web3.py ---
+    async def execute_protection_action(self, risk_event: dict):
+        """
+        Executes a protective action based on detected risk indicators.
 
-def perform_counter_sandwich(entry):
-    """
-    Detects and foils sandwich attacks by placing counter transactions.
-    """
-    logger.log_info(f"Initiating counter-sandwich strategy on {entry}")
-    sandwich_opportunity = detect_sandwich_attack(entry)
-    
-    if sandwich_opportunity:
-        place_counter_sandwich(entry, sandwich_opportunity)
-        logger.log_info(f"Counter-sandwich strategy completed for {entry}")
-        return True
-    else:
-        logger.log_info(f"No sandwich attack detected on {entry}.")
-        return False
+        Args:
+        - risk_event (dict): Data on the detected risk.
+        """
+        asset = risk_event.get("asset")
+        action_type = risk_event.get("action_type")  # "hedge" or "exit"
+        amount = risk_event.get("amount")
+        self.logger.info(f"Executing protection {action_type} for {asset} with amount {amount}")
 
-def perform_front_run(entry):
-    """
-    Executes a front-running transaction to preemptively secure a transaction.
-    """
-    logger.log_info(f"Initiating front-run defense for {entry}")
-    front_run_opportunity = detect_mempool_opportunity(entry)
-    
-    if front_run_opportunity:
-        place_front_run(entry, front_run_opportunity)
-        logger.log_info(f"Front-running defense executed for {entry}")
-        return True
-    else:
-        logger.log_info(f"No front-run opportunities found on {entry}.")
-        return False
+        # Execute the protective action based on risk assessment
+        success = await self.hedge_executor(asset, action_type, amount)
+        if success:
+            self.logger.info(f"Protection {action_type} action succeeded for {asset}")
+        else:
+            self.logger.warning(f"Protection {action_type} action failed for {asset}")
 
-def perform_back_run(entry):
-    """
-    Executes a back-running transaction to profit off a detected opportunity.
-    """
-    logger.log_info(f"Initiating back-run defense for {entry}")
-    back_run_opportunity = detect_profitable_tx(entry)
-    
-    if back_run_opportunity:
-        place_back_run(entry, back_run_opportunity)
-        logger.log_info(f"Back-running defense executed for {entry}")
-        return True
-    else:
-        logger.log_info(f"No back-run opportunities detected on {entry}.")
-        return False
+    # ---------------- Opportunity Handler for Mempool Integration Starts Here ----------------
+    def handle_protection_opportunity(self, risk_event: dict):
+        """
+        Responds to detected risk events from MempoolMonitor.
 
-def perform_liquidity_drain(entry):
-    """
-    Executes a liquidity drain to counter large liquidity removal attempts.
-    """
-    logger.log_info(f"Initiating liquidity drain strategy for {entry}")
-    drain_opportunity = detect_liquidity_removal(entry)
-    
-    if drain_opportunity:
-        place_liquidity_drain(entry, drain_opportunity)
-        logger.log_info(f"Liquidity drain executed for {entry}")
-        return True
-    else:
-        logger.log_info(f"No liquidity removal detected for {entry}.")
-        return False
+        Args:
+        - risk_event (dict): Risk data detected by the MempoolMonitor.
+        """
+        asset = risk_event.get("asset")
+        action_type = risk_event.get("action_type")
+        amount = risk_event.get("amount")
 
-# --- Real Logic Functions Using Web3.py ---
+        self.logger.info(f"Protection opportunity detected for {asset} with action {action_type} and amount {amount}")
 
-def detect_sandwich_attack(entry):
-    """
-    Detects sandwich attack attempts by analyzing the mempool and transaction patterns.
-    """
-    pending_txs = web3.eth.get_filter_logs("pending")  # Simulate mempool access for pending transactions
-    for tx in pending_txs:
-        if is_sandwich_pattern(tx, entry):
-            return tx
-    return None
+        # Execute protection action asynchronously
+        asyncio.create_task(self.execute_protection_action(risk_event))
+    # ---------------- Opportunity Handler Ends Here ----------------
 
-def place_counter_sandwich(entry, tx_to_disrupt):
-    """
-    Places a transaction to disrupt an ongoing sandwich attack.
-    """
-    # Place a strategic transaction to disrupt the attacker’s pattern
-    tx = {
-        "to": entry,
-        "value": Web3.toWei(0.1, "ether"),
-        "gas": 300000,
-        "gasPrice": tx_to_disrupt["gasPrice"] + Web3.toWei(1, "gwei")
-    }
-    signed_tx = web3.eth.account.sign_transaction(tx, private_key=os.getenv("PRIVATE_KEY"))
-    web3.eth.send_raw_transaction(signed_tx.rawTransaction)
-    logger.log_info(f"Counter-sandwich transaction sent to disrupt attack on {entry}")
+    # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
+    def handle_flash_loan_opportunity(self, opportunity: dict):
+        """
+        Responds to detected flash loan opportunities from FlashLoanMonitor.
 
-def detect_mempool_opportunity(entry):
-    """
-    Detects front-running opportunities by scanning mempool for target transactions.
-    """
-    pending_txs = web3.eth.get_filter_logs("pending")
-    for tx in pending_txs:
-        if tx["to"] == entry:
-            return tx
-    return None
+        Args:
+        - opportunity (dict): Opportunity data detected by FlashLoanMonitor.
+        """
+        asset = opportunity.get("asset")
+        amount = opportunity.get("amount")
 
-def place_front_run(entry, tx_to_preempt):
-    """
-    Executes a front-run transaction with higher gas price to ensure priority.
-    """
-    tx = {
-        "to": entry,
-        "value": Web3.toWei(0.1, "ether"),
-        "gas": 300000,
-        "gasPrice": tx_to_preempt["gasPrice"] + Web3.toWei(2, "gwei")
-    }
-    signed_tx = web3.eth.account.sign_transaction(tx, private_key=os.getenv("PRIVATE_KEY"))
-    web3.eth.send_raw_transaction(signed_tx.rawTransaction)
-    logger.log_info(f"Front-run transaction placed successfully for {entry}")
-
-def detect_profitable_tx(entry):
-    """
-    Detects a profitable transaction worth back-running.
-    """
-    pending_txs = web3.eth.get_filter_logs("pending")
-    for tx in pending_txs:
-        if tx["to"] == entry and is_profitable(tx):
-            return tx
-    return None
-
-def place_back_run(entry, tx_to_follow):
-    """
-    Places a back-run transaction to capitalize on the detected transaction.
-    """
-    tx = {
-        "to": entry,
-        "value": Web3.toWei(0.1, "ether"),
-        "gas": 300000,
-        "gasPrice": tx_to_follow["gasPrice"]
-    }
-    signed_tx = web3.eth.account.sign_transaction(tx, private_key=os.getenv("PRIVATE_KEY"))
-    web3.eth.send_raw_transaction(signed_tx.rawTransaction)
-    logger.log_info(f"Back-run transaction placed successfully for {entry}")
-
-def detect_liquidity_removal(entry):
-    """
-    Detects liquidity removal attempts by monitoring liquidity pool contract events.
-    """
-    # Placeholder for detecting large liquidity withdrawals
-    logs = web3.eth.get_logs({"fromBlock": "pending", "address": entry})
-    for log in logs:
-        if is_liquidity_removal(log):
-            return log
-    return None
-
-def place_liquidity_drain(entry, log):
-    """
-    Places transactions in response to a detected liquidity drain attempt.
-    """
-    tx = {
-        "to": entry,
-        "value": Web3.toWei(0.2, "ether"),
-        "gas": 500000,
-        "gasPrice": Web3.toWei(20, "gwei")
-    }
-    signed_tx = web3.eth.account.sign_transaction(tx, private_key=os.getenv("PRIVATE_KEY"))
-    web3.eth.send_raw_transaction(signed_tx.rawTransaction)
-    logger.log_info(f"Liquidity drain transaction placed to protect {entry}")
+        self.logger.info(f"Flash loan opportunity detected for protection on {asset} with amount {amount}")
+        asyncio.create_task(self.request_flash_loan(asset, amount))  # Trigger flash loan asynchronously
+    # ---------------- Opportunity Handler for Flash Loan Integration Ends Here ----------------
