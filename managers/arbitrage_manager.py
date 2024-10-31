@@ -19,6 +19,29 @@ class ArbitrageManager:
         self.bots = []
         self.active_tasks = []
 
+    # ---------------- Opportunity Handler Starts Here ----------------
+    def handle_arbitrage_opportunity(self, opportunity: dict):
+        """
+        Responds to detected arbitrage opportunities.
+        
+        Args:
+        - opportunity (dict): Opportunity data detected by the MempoolMonitor.
+        """
+        asset = opportunity.get("asset")
+        spread = opportunity.get("spread")
+        
+        logger.log("info", f"Arbitrage opportunity detected for {asset} with spread {spread * 100:.2f}%")
+
+        # Example: Fetch market data based on opportunity and trigger bot action
+        action = rl_agent.decide_action(opportunity)
+        
+        # Check safety and execute trade
+        if safety_manager.check_safety(opportunity):
+            asyncio.create_task(trade_executor.execute_trade(action))  # Non-blocking
+        else:
+            logger.log("warning", "Safety conditions not met. Skipping trade execution.")
+    # ---------------- Opportunity Handler Ends Here ----------------
+    
     async def start_arbitrage_bots(self, strategies):
         """
         Asynchronously start the arbitrage bots based on the provided strategies.

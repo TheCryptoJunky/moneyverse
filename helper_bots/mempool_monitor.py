@@ -24,32 +24,17 @@ class MempoolMonitor:
         self.logger.info("MempoolMonitor initialized for centralized monitoring.")
 
     def register_strategy(self, strategy_func: Callable):
-        """
-        Registers a strategy to be notified on detected opportunities.
-
-        Args:
-        - strategy_func (callable): Strategy function to be notified.
-        """
+        """Registers a strategy to be notified on detected opportunities."""
         self.strategies.append(strategy_func)
         self.logger.info(f"Registered strategy {strategy_func.__name__} for mempool notifications.")
 
     def register_manager(self, manager_func: Callable):
-        """
-        Registers a manager to coordinate actions on detected opportunities.
-
-        Args:
-        - manager_func (callable): Manager function to be notified.
-        """
+        """Registers a manager to coordinate actions on detected opportunities."""
         self.managers.append(manager_func)
         self.logger.info(f"Registered manager {manager_func.__name__} for mempool coordination.")
 
     def monitor_mempool(self, interval: float = 1.0):
-        """
-        Continuously monitors the mempool for trade opportunities.
-
-        Args:
-        - interval (float): Time interval between mempool checks in seconds.
-        """
+        """Continuously monitors the mempool for trade opportunities."""
         self.logger.info("Starting mempool monitoring.")
         while True:
             opportunities = self.analysis_func()
@@ -59,24 +44,14 @@ class MempoolMonitor:
             time.sleep(interval)
 
     def notify_strategies(self, opportunities: List[Dict[str, any]]):
-        """
-        Notifies all registered strategies of detected opportunities.
-
-        Args:
-        - opportunities (list): List of opportunities detected in the mempool.
-        """
+        """Notifies all registered strategies of detected opportunities."""
         for strategy_func in self.strategies:
             for opportunity in opportunities:
                 self.logger.info(f"Notifying {strategy_func.__name__} of opportunity in {opportunity['asset']}")
                 strategy_func(opportunity)
 
     def notify_managers(self, opportunities: List[Dict[str, any]]):
-        """
-        Notifies all registered managers to coordinate strategy actions.
-
-        Args:
-        - opportunities (list): List of opportunities detected in the mempool.
-        """
+        """Notifies all registered managers to coordinate strategy actions."""
         for manager_func in self.managers:
             for opportunity in opportunities:
                 self.logger.info(f"Notifying manager {manager_func.__name__} of opportunity in {opportunity['asset']}")

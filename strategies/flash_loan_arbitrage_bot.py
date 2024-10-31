@@ -1,81 +1,93 @@
 # moneyverse/strategies/flash_loan_arbitrage_bot.py
 
 import logging
-from typing import Dict
+from typing import Dict, Callable
+import asyncio
 
 class FlashLoanArbitrageBot:
     """
-    Executes flash loan-based arbitrage to capitalize on large, temporary price discrepancies across markets.
+    Executes flash loan-based arbitrage by borrowing and immediately repaying assets in a single transaction.
 
     Attributes:
-    - threshold (float): Minimum profit margin to initiate flash loan arbitrage.
-    - logger (Logger): Tracks bot actions and detected opportunities.
+    - flash_loan_provider (Callable): Function to request a flash loan.
+    - arbitrage_executor (Callable): Function to execute arbitrage trades with flash loan funds.
+    - logger (Logger): Logs flash loan and arbitrage actions.
     """
 
-    def __init__(self, threshold=0.02):
-        self.threshold = threshold  # Default minimum profit margin, adjustable from StrategyManager
+    def __init__(self, flash_loan_provider: Callable, arbitrage_executor: Callable):
+        self.flash_loan_provider = flash_loan_provider
+        self.arbitrage_executor = arbitrage_executor
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"FlashLoanArbitrageBot initialized with threshold: {self.threshold * 100}%")
+        self.logger.info("FlashLoanArbitrageBot initialized.")
 
-    def detect_opportunity(self, market_data: Dict[str, float]) -> Dict[str, float]:
+    async def request_flash_loan(self, asset: str, amount: float) -> bool:
         """
-        Detects high-profit flash loan arbitrage opportunities based on market data.
+        Requests a flash loan for the specified asset and amount, then executes arbitrage and repays.
 
         Args:
-        - market_data (dict): Market prices, keyed by market name.
+        - asset (str): Asset symbol for the flash loan.
+        - amount (float): Amount to borrow.
 
         Returns:
-        - dict: Contains opportunity details if a profitable trade is detected.
+        - bool: True if flash loan and arbitrage were successful, False otherwise.
         """
-        opportunities = {}
-
-        for market1, price1 in market_data.items():
-            for market2, price2 in market_data.items():
-                if market1 != market2 and price2 > price1 * (1 + self.threshold):
-                    opportunities = {
-                        'borrow_market': market1,
-                        'repay_market': market2,
-                        'profit': price2 - price1
-                    }
-                    self.logger.info(f"Flash loan arbitrage detected: Borrow from {market1}, repay on {market2} for profit {opportunities['profit']}")
-                    return opportunities
-
-        self.logger.debug("No flash loan arbitrage opportunities detected.")
-        return opportunities
-
-    def execute_arbitrage(self, wallet, opportunity: Dict[str, float], loan_amount: float):
-        """
-        Executes a flash loan arbitrage using a detected opportunity.
-
-        Args:
-        - wallet (Wallet): The wallet instance executing the flash loan.
-        - opportunity (dict): Details of the flash loan arbitrage opportunity.
-        - loan_amount (float): Amount to borrow in the flash loan.
-        """
-        if not opportunity:
-            self.logger.warning("No opportunity available for flash loan arbitrage execution.")
-            return
-
-        borrow_market = opportunity['borrow_market']
-        repay_market = opportunity['repay_market']
-        profit = opportunity['profit']
-
-        # Simulate borrowing, trading, and repaying in a single transaction
-        wallet.update_balance(borrow_market, -loan_amount)
-        wallet.update_balance(repay_market, loan_amount * (1 + self.threshold))
-        self.logger.info(f"Executed flash loan arbitrage: Borrowed {loan_amount} from {borrow_market}, repaid on {repay_market}, profit {profit}.")
-
-    def run(self, wallet, market_data: Dict[str, float], loan_amount: float):
-        """
-        Detects and executes flash loan arbitrage if profitable opportunities are available.
-
-        Args:
-        - wallet (Wallet): The wallet instance to execute the trade.
-        - market_data (dict): Market prices to analyze for flash loan arbitrage.
-        - loan_amount (float): Amount for the flash loan if an opportunity is detected.
-        """
-        opportunity = self.detect_opportunity(market_data)
-        if opportunity:
-            self.execute_arbitrage(wallet, opportunity, loan_amount)
+        self.logger.info(f"Requesting flash loan for {asset} amount {amount}")
+        success = await self.flash_loan_provider(asset, amount, self.execute_arbitrage)
+        if success:
+            self.logger.info(f"Flash loan and arbitrage executed successfully for {asset}")
         else:
-            self.logger.info("No flash loan arbitrage executed; no suitable opportunity detected.")
+            self.logger.warning(f"Flash loan or arbitrage failed for {asset}")
+        return success
+
+    async def execute_arbitrage(self, asset: str, amount: float) -> bool:
+        """
+        Executes the arbitrage trade using borrowed flash loan funds.
+
+        Args:
+        - asset (str): Asset symbol.
+        - amount (float): Amount of asset to use for arbitrage.
+
+        Returns:
+        - bool: True if arbitrage was successful, False otherwise.
+        """
+        self.logger.info(f"Executing arbitrage for {asset} with amount {amount}")
+        try:
+            arbitrage_success = await self.arbitrage_executor(asset, amount)
+            if arbitrage_success:
+                self.logger.info(f"Arbitrage executed successfully for {asset}")
+                return True
+            else:
+                self.logger.warning(f"Arbitrage execution failed for {asset}")
+                return False
+        except Exception as e:
+            self.logger.error(f"Error during arbitrage execution for {asset}: {e}")
+            return False
+
+    async def run_flash_loan_arbitrage(self, asset: str, amount: float, interval: float = 1.0):
+        """
+        Periodically requests a flash loan and performs arbitrage.
+
+        Args:
+        - asset (str): Asset symbol to perform arbitrage with.
+        - amount (float): Amount to borrow for arbitrage.
+        - interval (float): Time interval between checks in seconds.
+        """
+        self.logger.info(f"Starting flash loan arbitrage for {asset} every {interval} seconds")
+        while True:
+            await self.request_flash_loan(asset, amount)
+            await asyncio.sleep(interval)
+
+    # ---------------- Opportunity Handler for Mempool Integration Starts Here ----------------
+    def handle_flash_loan_arbitrage_opportunity(self, opportunity: dict):
+        """
+        Responds to detected flash loan arbitrage opportunities from MempoolMonitor.
+
+        Args:
+        - opportunity (dict): Opportunity data detected by the MempoolMonitor.
+        """
+        asset = opportunity.get("asset")
+        amount = opportunity.get("amount")
+        
+        self.logger.info(f"Flash loan arbitrage opportunity detected for {asset} with amount {amount}")
+        asyncio.create_task(self.request_flash_loan(asset, amount))  # Trigger flash loan asynchronously
+    # ---------------- Opportunity Handler Ends Here ----------------
