@@ -1,98 +1,88 @@
 import logging
 import numpy as np
 from pomegranate import BayesianNetwork, DiscreteDistribution, ConditionalProbabilityTable, State
+from typing import Dict
 from ..database.db_connection import DatabaseConnection
 
 class PGMModel:
     """
-    Probabilistic Graphical Model (PGM) that uses Bayesian Networks to make probabilistic predictions.
+    Probabilistic Graphical Model (PGM) for evaluating market trends and conditions.
     
     Attributes:
-    - db (DatabaseConnection): Database connection for logging predictions.
-    - model (BayesianNetwork): Bayesian Network model instance.
+    - db (DatabaseConnection): Database for logging performance.
+    - model (BayesianNetwork): Bayesian network for probabilistic reasoning.
     """
 
     def __init__(self, db: DatabaseConnection):
         self.db = db
         self.model = self._build_model()
         self.logger = logging.getLogger(__name__)
-        self.logger.info("Initialized Bayesian Network for PGMModel.")
+        self.logger.info("PGM Model initialized with Bayesian Network.")
 
     def _build_model(self):
         """
-        Constructs the Bayesian Network with conditional probability tables.
+        Builds a Bayesian Network to model relationships between observed market variables.
 
         Returns:
-        - BayesianNetwork: Initialized Bayesian Network model.
+        - BayesianNetwork: Configured Bayesian Network.
         """
-        # Define prior distributions for variables
-        market_trend = DiscreteDistribution({"bullish": 0.5, "bearish": 0.5})
-        volatility = DiscreteDistribution({"low": 0.5, "high": 0.5})
+        volatility = DiscreteDistribution({'low': 0.5, 'high': 0.5})
+        trend = DiscreteDistribution({'bullish': 0.5, 'bearish': 0.5})
 
-        # Conditional probability tables based on dependencies
-        price_movement = ConditionalProbabilityTable(
+        market_condition = ConditionalProbabilityTable(
             [
-                ["bullish", "low", "up", 0.7],
-                ["bullish", "low", "down", 0.3],
-                ["bullish", "high", "up", 0.6],
-                ["bullish", "high", "down", 0.4],
-                ["bearish", "low", "up", 0.2],
-                ["bearish", "low", "down", 0.8],
-                ["bearish", "high", "up", 0.1],
-                ["bearish", "high", "down", 0.9]
+                ['low', 'bullish', 'stable', 0.6],
+                ['low', 'bullish', 'volatile', 0.4],
+                ['low', 'bearish', 'stable', 0.7],
+                ['low', 'bearish', 'volatile', 0.3],
+                ['high', 'bullish', 'stable', 0.3],
+                ['high', 'bullish', 'volatile', 0.7],
+                ['high', 'bearish', 'stable', 0.4],
+                ['high', 'bearish', 'volatile', 0.6]
             ],
-            [market_trend, volatility]
+            [volatility, trend]
         )
 
-        # Create states
-        market_trend_state = State(market_trend, name="market_trend")
-        volatility_state = State(volatility, name="volatility")
-        price_movement_state = State(price_movement, name="price_movement")
+        s1 = State(volatility, name="volatility")
+        s2 = State(trend, name="trend")
+        s3 = State(market_condition, name="market_condition")
 
-        # Build the network
-        model = BayesianNetwork("Market Analysis Network")
-        model.add_states(market_trend_state, volatility_state, price_movement_state)
-        model.add_edge(market_trend_state, price_movement_state)
-        model.add_edge(volatility_state, price_movement_state)
+        model = BayesianNetwork("Market Trend Model")
+        model.add_states(s1, s2, s3)
+        model.add_edge(s1, s3)
+        model.add_edge(s2, s3)
         model.bake()
-
+        
+        self.logger.info("Bayesian Network built for market condition analysis.")
         return model
 
-    def predict_market_movement(self, market_trend: str, volatility: str) -> str:
+    def predict_market_movement(self, volatility: str, trend: str) -> Dict[str, float]:
         """
-        Predicts market movement based on given trend and volatility levels.
+        Predicts market movement given volatility and trend conditions.
 
         Args:
-        - market_trend (str): The current market trend ("bullish" or "bearish").
-        - volatility (str): The current market volatility ("low" or "high").
+        - volatility (str): Observed volatility ("low" or "high").
+        - trend (str): Observed trend ("bullish" or "bearish").
 
         Returns:
-        - str: Predicted market movement ("up" or "down").
+        - dict: Predicted probabilities for market conditions.
         """
-        belief = self.model.predict_proba({"market_trend": market_trend, "volatility": volatility})
-        price_movement_belief = belief[-1].parameters[0]
-        prediction = "up" if price_movement_belief["up"] > price_movement_belief["down"] else "down"
-        self.logger.info(f"Market prediction based on trend {market_trend} and volatility {volatility}: {prediction}")
-        return prediction
+        try:
+            beliefs = self.model.predict_proba({'volatility': volatility, 'trend': trend})
+            market_probs = beliefs[2].parameters[0]
+            self.logger.info(f"Predicted market condition probabilities: {market_probs}")
+            return market_probs
+        except Exception as e:
+            self.logger.error(f"Error in market movement prediction: {e}")
+            return {}
 
-    def log_prediction(self, asset: str, prediction: str):
+    def log_prediction(self, conditions: Dict[str, str], prediction: Dict[str, float]):
         """
-        Logs probabilistic predictions into the database for historical tracking.
-
-        Args:
-        - asset (str): Asset symbol.
-        - prediction (str): Predicted market movement.
-        """
-        self.db.log_forecast(asset, {"market_prediction": prediction})
-        self.logger.info(f"Logged prediction for {asset}: {prediction}")
-
-    def update_model(self, new_data: dict):
-        """
-        Updates the Bayesian Network with new data to refine predictions.
+        Logs the prediction results for market condition analysis.
 
         Args:
-        - new_data (dict): Dictionary containing market data for updating probabilities.
+        - conditions (dict): Observed conditions (e.g., volatility and trend).
+        - prediction (dict): Prediction result with probabilities.
         """
-        # Placeholder for dynamic model update
-        # Example: Retrain conditional probabilities with new data if needed
-        self.logger.info("Bayesian Network updated with new data.")
+        self.db.log_pgm_prediction(conditions, prediction)
+        self.logger.info(f"Prediction logged with conditions {conditions} and results {prediction}.")
