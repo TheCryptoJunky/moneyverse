@@ -1,51 +1,93 @@
-# Full file path: /moneyverse/strategies/moving_average_crossover_strategy.py
+# moneyverse/strategies/moving_average_crossover_strategy.py
 
-import pandas as pd
-import numpy as np
-from ai.rl_algorithms import PPOAgent, LSTM_MemoryAgent
+import logging
+from typing import List
 
 class MovingAverageCrossoverStrategy:
     """
-    Implements a dynamic Moving Average Crossover Strategy with RL-based adaptive window sizes.
+    Detects buying and selling signals based on the crossover of short-term and long-term moving averages.
+
+    Attributes:
+    - short_window (int): Period for the short-term moving average.
+    - long_window (int): Period for the long-term moving average.
+    - logger (Logger): Logs bot actions and detected opportunities.
     """
-    def __init__(self, short_window=40, long_window=100):
-        self.short_window = short_window
-        self.long_window = long_window
-        self.agent = PPOAgent(environment="moving_average_crossover")  # RL agent for adjusting parameters
 
-    def generate_signals(self, data):
+    def __init__(self, short_window=10, long_window=50):
+        self.short_window = short_window  # Short-term moving average window
+        self.long_window = long_window  # Long-term moving average window
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"MovingAverageCrossoverStrategy initialized with short window: {self.short_window}, long window: {self.long_window}")
+
+    def calculate_moving_average(self, prices: List[float], window: int) -> float:
         """
-        Generates buy/sell signals based on moving average crossover, adjusting windows based on RL agent.
+        Calculates the moving average for a given price history and window size.
+
+        Args:
+        - prices (list): List of historical prices.
+        - window (int): Number of data points to include in moving average calculation.
+
+        Returns:
+        - float: Calculated moving average of prices.
         """
-        # Update window sizes based on RL agent decisions
-        self.adapt_window_sizes(data)
+        if len(prices) < window:
+            self.logger.warning(f"Not enough data to calculate {window}-period moving average.")
+            return sum(prices) / len(prices)  # Fallback if less data available
+        moving_average = sum(prices[-window:]) / window
+        self.logger.debug(f"Calculated {window}-period moving average: {moving_average}")
+        return moving_average
 
-        short_ma = data['close'].rolling(window=self.short_window).mean()
-        long_ma = data['close'].rolling(window=self.long_window).mean()
-
-        signals = pd.DataFrame(index=data.index)
-        signals['signal'] = np.where(short_ma > long_ma, 1, 0)  # Buy signal when short MA crosses above long MA
-
-        return signals
-
-    def adapt_window_sizes(self, data):
+    def detect_crossover(self, short_ma: float, long_ma: float) -> str:
         """
-        Uses the RL agent to adjust short and long window sizes based on recent performance.
-        """
-        state = self.get_state(data)
-        action = self.agent.decide_action(state)
+        Determines if there is a crossover between the short and long moving averages.
 
-        # Assuming action output influences short and long window sizes
-        self.short_window = max(20, int(self.short_window + action['short_adjustment']))
-        self.long_window = max(self.short_window + 20, int(self.long_window + action['long_adjustment']))
+        Args:
+        - short_ma (float): Short-term moving average.
+        - long_ma (float): Long-term moving average.
 
-    def get_state(self, data):
+        Returns:
+        - str: "buy" if short crosses above long, "sell" if short crosses below long, otherwise empty.
         """
-        Constructs the current state for the RL agent, based on recent price trends and market volatility.
+        if short_ma > long_ma:
+            self.logger.info("Bullish crossover detected: Short MA above Long MA - Buy signal.")
+            return "buy"
+        elif short_ma < long_ma:
+            self.logger.info("Bearish crossover detected: Short MA below Long MA - Sell signal.")
+            return "sell"
+        self.logger.debug("No crossover detected.")
+        return ""
+
+    def execute_trade(self, wallet, action: str, amount: float, price: float):
         """
-        recent_data = data['close'][-self.long_window:]
-        state = {
-            "recent_trend": np.mean(recent_data.pct_change().fillna(0)),
-            "volatility": np.std(recent_data.pct_change().fillna(0))
-        }
-        return state
+        Executes a trade based on the crossover signal.
+
+        Args:
+        - wallet (Wallet): Wallet instance to execute the trade.
+        - action (str): "buy" or "sell" action.
+        - amount (float): Amount of asset to trade.
+        - price (float): Current price at which to trade.
+        """
+        if action == "buy":
+            wallet.update_balance("buy", amount * price)
+            self.logger.info(f"Executed crossover buy trade for {amount} at {price}.")
+        elif action == "sell":
+            wallet.update_balance("sell", -amount * price)
+            self.logger.info(f"Executed crossover sell trade for {amount} at {price}.")
+
+    def run(self, wallet, price_history: List[float], current_price: float, amount: float):
+        """
+        Detects and executes trades based on moving average crossovers.
+
+        Args:
+        - wallet (Wallet): Wallet instance for executing trades.
+        - price_history (list): Historical price data for calculating moving averages.
+        - current_price (float): Current market price of the asset.
+        - amount (float): Amount to trade if an opportunity is detected.
+        """
+        short_ma = self.calculate_moving_average(price_history, self.short_window)
+        long_ma = self.calculate_moving_average(price_history, self.long_window)
+        action = self.detect_crossover(short_ma, long_ma)
+        if action:
+            self.execute_trade(wallet, action, amount, current_price)
+        else:
+            self.logger.info("No moving average crossover trade executed; no suitable opportunity detected.")

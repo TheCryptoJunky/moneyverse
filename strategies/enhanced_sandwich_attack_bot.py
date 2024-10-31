@@ -1,122 +1,86 @@
-# Full file path: /moneyverse/strategies/enhanced_sandwich_attack_bot.py
+# moneyverse/strategies/enhanced_sandwich_attack_bot.py
 
-import asyncio
-from ai.agents.rl_agent import RLTradingAgent
-from centralized_logger import CentralizedLogger
-from src.managers.transaction_manager import TransactionManager
-from src.managers.risk_manager import RiskManager
-from market_data import MarketDataAPI
-from src.utils.error_handler import handle_errors
-from ai.rl_algorithms import DDPGAgent, PPOAgent, LSTM_MemoryAgent, MARLAgent
-
-# Initialize components
-logger = CentralizedLogger()
-transaction_manager = TransactionManager()
-risk_manager = RiskManager()
-market_data_api = MarketDataAPI()
-
-# Initialize multiple RL agents for dynamic selection, including memory-based LSTM
-ddpg_agent = DDPGAgent(environment="enhanced_sandwich_attack")
-ppo_agent = PPOAgent(environment="enhanced_sandwich_attack")
-lstm_agent = LSTM_MemoryAgent(environment="enhanced_sandwich_attack")
-marl_agent = MARLAgent(environment="enhanced_sandwich_attack")
-
-# Track performance for each agent
-agent_performance = {"DDPG": 0, "PPO": 0, "LSTM": 0, "MARL": 0}
+import logging
+from typing import Dict
 
 class EnhancedSandwichAttackBot:
-    def __init__(self):
-        self.running = True
-        self.rl_agent = None
-        self.select_agent()  # Initialize with the best performing agent
+    """
+    Detects and executes sandwich attacks by placing two trades around a large pending transaction to profit from price impact.
 
-    def select_agent(self):
-        """Select the best-performing agent based on recent trade performance."""
-        best_agent_name = max(agent_performance, key=agent_performance.get)
-        self.rl_agent = {
-            "DDPG": ddpg_agent,
-            "PPO": ppo_agent,
-            "LSTM": lstm_agent,
-            "MARL": marl_agent,
-        }[best_agent_name]
-        logger.log_info(f"Selected agent: {best_agent_name}")
+    Attributes:
+    - threshold (float): Minimum profit margin to justify a sandwich attack.
+    - logger (Logger): Logs bot actions and detected opportunities.
+    """
 
-    async def fetch_market_data(self):
-        """Fetch market data for sandwich attack opportunities."""
-        try:
-            market_data = await market_data_api.get_sandwich_attack_data()
-            logger.log_info(f"Fetched sandwich attack market data: {market_data}")
-            return market_data
-        except Exception as e:
-            logger.log_error(f"Failed to fetch market data: {e}")
-            handle_errors(e)
-            return None
+    def __init__(self, threshold=0.02):
+        self.threshold = threshold  # Minimum profit margin for sandwich attack
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"EnhancedSandwichAttackBot initialized with threshold: {self.threshold * 100}%")
 
-    def ai_decision(self, market_data):
-        """Make an AI-driven trading decision using the selected RL agent."""
-        try:
-            action = self.rl_agent.decide_action(market_data)
-            logger.log_info(f"AI decision by {self.rl_agent.__class__.__name__}: {action}")
-            return action
-        except Exception as e:
-            logger.log_error(f"Error in AI decision-making: {e}")
-            handle_errors(e)
-            return None
+    def detect_opportunity(self, pending_transactions: Dict[str, float], market_price: float) -> Dict[str, float]:
+        """
+        Detects sandwich attack opportunities based on pending large transactions.
 
-    async def execute_trade(self, trade_data):
-        """Execute trade and update agent performance based on success or failure."""
-        trade_success = await transaction_manager.execute_trade(trade_data)
-        agent_type = self.rl_agent.__class__.__name__
+        Args:
+        - pending_transactions (dict): Dictionary of pending transaction sizes by address.
+        - market_price (float): Current market price of the target asset.
 
-        if trade_success:
-            logger.log_info(f"Trade executed successfully: {trade_data}")
-            agent_performance[agent_type] += 1  # Reward successful trade
+        Returns:
+        - dict: Contains opportunity details if detected.
+        """
+        for tx_address, tx_size in pending_transactions.items():
+            # Calculate potential price impact for the transaction
+            expected_price_impact = tx_size / market_price
+            potential_profit = expected_price_impact - self.threshold
+
+            # If profit exceeds threshold, a sandwich attack opportunity is detected
+            if potential_profit > 0:
+                opportunity = {
+                    'front_run_price': market_price * (1 + self.threshold),
+                    'back_run_price': market_price * (1 - self.threshold),
+                    'profit': potential_profit
+                }
+                self.logger.info(f"Sandwich attack opportunity detected: Front-run at {opportunity['front_run_price']}, "
+                                 f"back-run at {opportunity['back_run_price']}, profit: {opportunity['profit']}")
+                return opportunity
+
+        self.logger.debug("No sandwich attack opportunities detected.")
+        return {}
+
+    def execute_sandwich_attack(self, wallet, opportunity: Dict[str, float], amount: float):
+        """
+        Executes a sandwich attack based on detected opportunity.
+
+        Args:
+        - wallet (Wallet): Wallet instance for executing the attack.
+        - opportunity (dict): Contains details of the sandwich attack opportunity.
+        - amount (float): Amount to trade.
+        """
+        if not opportunity:
+            self.logger.warning("No opportunity available for sandwich attack execution.")
+            return
+
+        front_run_price = opportunity['front_run_price']
+        back_run_price = opportunity['back_run_price']
+        profit = opportunity['profit']
+
+        # Simulate front-run and back-run transactions
+        wallet.update_balance("front_run", -amount * front_run_price)
+        wallet.update_balance("back_run", amount * back_run_price)
+        self.logger.info(f"Executed sandwich attack: Front-run at {front_run_price}, back-run at {back_run_price}, profit: {profit}")
+
+    def run(self, wallet, pending_transactions: Dict[str, float], market_price: float, amount: float):
+        """
+        Detects and executes sandwich attack if profitable opportunities are available.
+
+        Args:
+        - wallet (Wallet): Wallet instance for executing the sandwich attack.
+        - pending_transactions (dict): Pending large transactions in the market.
+        - market_price (float): Current market price of the target asset.
+        - amount (float): Amount to trade if an opportunity is detected.
+        """
+        opportunity = self.detect_opportunity(pending_transactions, market_price)
+        if opportunity:
+            self.execute_sandwich_attack(wallet, opportunity, amount)
         else:
-            logger.log_warning(f"Trade failed: {trade_data}")
-            agent_performance[agent_type] -= 1  # Penalize failed trade
-
-    async def run(self):
-        """Main loop to operate the enhanced sandwich attack bot with dynamic agent switching."""
-        logger.log_info("Starting Enhanced Sandwich Attack Bot with dynamic agent selection...")
-        try:
-            while self.running:
-                # Re-evaluate and select the best-performing agent if necessary
-                if max(agent_performance.values()) != agent_performance[self.rl_agent.__class__.__name__]:
-                    self.select_agent()
-
-                market_data = await self.fetch_market_data()
-                if market_data is None:
-                    logger.log_warning("No market data available; retrying in 30 seconds.")
-                    await asyncio.sleep(30)
-                    continue
-
-                action = self.ai_decision(market_data)
-                if action is None:
-                    logger.log_warning("AI decision failed; retrying in 30 seconds.")
-                    await asyncio.sleep(30)
-                    continue
-
-                if risk_manager.is_risk_compliant(market_data):
-                    trade_data = {
-                        "source_wallet": action.get("source_wallet"),
-                        "amount": action.get("amount"),
-                        "trade_type": "sandwich_attack"
-                    }
-                    await self.execute_trade(trade_data)
-                else:
-                    logger.log_warning("Risk thresholds exceeded. Skipping trade execution.")
-
-                await asyncio.sleep(30)  # Adjust based on desired trade frequency
-
-        except Exception as e:
-            logger.log_error(f"Critical error in Enhanced Sandwich Attack Bot: {e}")
-            handle_errors(e)
-
-    def stop(self):
-        """Stops the enhanced sandwich attack bot."""
-        logger.log_info("Stopping Enhanced Sandwich Attack Bot...")
-        self.running = False
-
-if __name__ == "__main__":
-    bot = EnhancedSandwichAttackBot()
-    asyncio.run(bot.run())
+            self.logger.info("No sandwich attack executed; no suitable opportunity detected.")

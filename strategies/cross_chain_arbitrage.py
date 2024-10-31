@@ -1,122 +1,90 @@
-# Full file path: /moneyverse/strategies/cross_chain_arbitrage.py
+# moneyverse/strategies/cross_chain_arbitrage.py
 
-import asyncio
-from ai.agents.rl_agent import RLTradingAgent
-from centralized_logger import CentralizedLogger
-from src.managers.transaction_manager import TransactionManager
-from src.managers.risk_manager import RiskManager
-from market_data import MarketDataAPI
-from src.utils.error_handler import handle_errors
-from ai.rl_algorithms import DDPGAgent, PPOAgent, LSTM_MemoryAgent, MARLAgent
-
-# Initialize components
-logger = CentralizedLogger()
-transaction_manager = TransactionManager()
-risk_manager = RiskManager()
-market_data_api = MarketDataAPI()
-
-# Initialize multiple RL agents for dynamic selection, including memory-based LSTM
-ddpg_agent = DDPGAgent(environment="cross_chain_arbitrage")
-ppo_agent = PPOAgent(environment="cross_chain_arbitrage")
-lstm_agent = LSTM_MemoryAgent(environment="cross_chain_arbitrage")
-marl_agent = MARLAgent(environment="cross_chain_arbitrage")
-
-# Track performance for each agent
-agent_performance = {"DDPG": 0, "PPO": 0, "LSTM": 0, "MARL": 0}
+import logging
+from typing import Dict
 
 class CrossChainArbitrageBot:
-    def __init__(self):
-        self.running = True
-        self.rl_agent = None
-        self.select_agent()  # Initialize with the best performing agent
+    """
+    Detects and executes cross-chain arbitrage opportunities to exploit price discrepancies across different blockchain networks.
 
-    def select_agent(self):
-        """Select the best-performing agent based on recent performance metrics."""
-        best_agent_name = max(agent_performance, key=agent_performance.get)
-        self.rl_agent = {
-            "DDPG": ddpg_agent,
-            "PPO": ppo_agent,
-            "LSTM": lstm_agent,
-            "MARL": marl_agent,
-        }[best_agent_name]
-        logger.log_info(f"Selected agent: {best_agent_name}")
+    Attributes:
+    - threshold (float): Minimum price difference required to trigger arbitrage.
+    - logger (Logger): Logs bot actions and detected opportunities.
+    """
 
-    async def fetch_market_data(self):
-        """Fetch market data specifically for cross-chain arbitrage."""
-        try:
-            market_data = await market_data_api.get_cross_chain_arbitrage_data()
-            logger.log_info(f"Fetched cross-chain market data: {market_data}")
-            return market_data
-        except Exception as e:
-            logger.log_error(f"Failed to fetch market data: {e}")
-            handle_errors(e)
-            return None
+    def __init__(self, threshold=0.015):
+        self.threshold = threshold  # Minimum profit margin for cross-chain arbitrage
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"CrossChainArbitrageBot initialized with threshold: {self.threshold * 100}%")
 
-    def ai_decision(self, market_data):
-        """Make an AI-driven trading decision using the selected RL agent."""
-        try:
-            action = self.rl_agent.decide_action(market_data)
-            logger.log_info(f"AI decision by {self.rl_agent.__class__.__name__}: {action}")
-            return action
-        except Exception as e:
-            logger.log_error(f"Error in AI decision-making: {e}")
-            handle_errors(e)
-            return None
+    def detect_opportunity(self, chain_data: Dict[str, Dict[str, float]]) -> Dict[str, float]:
+        """
+        Detects cross-chain arbitrage opportunities based on blockchain data.
 
-    async def execute_trade(self, trade_data):
-        """Execute trade and update agent performance based on success or failure."""
-        trade_success = await transaction_manager.execute_trade(trade_data)
-        agent_type = self.rl_agent.__class__.__name__
+        Args:
+        - chain_data (dict): Market prices across chains, structured as {chain: {asset: price}}.
 
-        if trade_success:
-            logger.log_info(f"Trade executed successfully: {trade_data}")
-            agent_performance[agent_type] += 1  # Reward successful trade
+        Returns:
+        - dict: Contains details of the arbitrage opportunity if detected.
+        """
+        chains = list(chain_data.keys())
+        opportunities = {}
+
+        for i in range(len(chains)):
+            for j in range(i + 1, len(chains)):
+                chain1, chain2 = chains[i], chains[j]
+                for asset in chain_data[chain1]:
+                    if asset in chain_data[chain2]:
+                        price1 = chain_data[chain1][asset]
+                        price2 = chain_data[chain2][asset]
+                        
+                        # Identify profitable cross-chain arbitrage
+                        if price2 > price1 * (1 + self.threshold):
+                            opportunities = {'buy_chain': chain1, 'sell_chain': chain2, 'asset': asset, 'profit': price2 - price1}
+                            self.logger.info(f"Cross-chain arbitrage detected: Buy {asset} on {chain1}, sell on {chain2}, profit: {opportunities['profit']}")
+                            return opportunities
+                        elif price1 > price2 * (1 + self.threshold):
+                            opportunities = {'buy_chain': chain2, 'sell_chain': chain1, 'asset': asset, 'profit': price1 - price2}
+                            self.logger.info(f"Cross-chain arbitrage detected: Buy {asset} on {chain2}, sell on {chain1}, profit: {opportunities['profit']}")
+                            return opportunities
+
+        self.logger.debug("No cross-chain arbitrage opportunities detected.")
+        return opportunities
+
+    def execute_arbitrage(self, wallet, opportunity: Dict[str, float], amount: float):
+        """
+        Executes cross-chain arbitrage using the detected opportunity.
+
+        Args:
+        - wallet (Wallet): Wallet instance to execute the cross-chain trade.
+        - opportunity (dict): Details of the arbitrage opportunity.
+        - amount (float): Amount to trade.
+        """
+        if not opportunity:
+            self.logger.warning("No opportunity available for cross-chain arbitrage execution.")
+            return
+
+        buy_chain = opportunity['buy_chain']
+        sell_chain = opportunity['sell_chain']
+        asset = opportunity['asset']
+        profit = opportunity['profit']
+
+        # Simulate cross-chain transfer, trade, and logging
+        wallet.update_balance(buy_chain, -amount)
+        wallet.update_balance(sell_chain, amount * (1 + self.threshold))
+        self.logger.info(f"Executed cross-chain arbitrage: Bought {amount} {asset} on {buy_chain}, sold on {sell_chain}, profit: {profit}.")
+
+    def run(self, wallet, chain_data: Dict[str, Dict[str, float]], amount: float):
+        """
+        Detects and executes cross-chain arbitrage if profitable opportunities are available.
+
+        Args:
+        - wallet (Wallet): Wallet instance for executing the trade.
+        - chain_data (dict): Market prices across chains to analyze for cross-chain arbitrage.
+        - amount (float): Amount to trade if an opportunity is detected.
+        """
+        opportunity = self.detect_opportunity(chain_data)
+        if opportunity:
+            self.execute_arbitrage(wallet, opportunity, amount)
         else:
-            logger.log_warning(f"Trade failed: {trade_data}")
-            agent_performance[agent_type] -= 1  # Penalize failed trade
-
-    async def run(self):
-        """Main loop to operate the cross-chain arbitrage bot with dynamic agent switching."""
-        logger.log_info("Starting Cross Chain Arbitrage Bot with dynamic agent selection...")
-        try:
-            while self.running:
-                # Re-evaluate and select the best-performing agent if necessary
-                if max(agent_performance.values()) != agent_performance[self.rl_agent.__class__.__name__]:
-                    self.select_agent()
-
-                market_data = await self.fetch_market_data()
-                if market_data is None:
-                    logger.log_warning("No market data available; retrying in 60 seconds.")
-                    await asyncio.sleep(60)
-                    continue
-
-                action = self.ai_decision(market_data)
-                if action is None:
-                    logger.log_warning("AI decision failed; retrying in 60 seconds.")
-                    await asyncio.sleep(60)
-                    continue
-
-                if risk_manager.is_risk_compliant(market_data):
-                    trade_data = {
-                        "source_wallet": action.get("source_wallet"),
-                        "amount": action.get("amount"),
-                        "trade_type": "cross_chain_arbitrage"
-                    }
-                    await self.execute_trade(trade_data)
-                else:
-                    logger.log_warning("Risk thresholds exceeded. Skipping trade execution.")
-
-                await asyncio.sleep(60)  # Adjust based on desired trade frequency
-
-        except Exception as e:
-            logger.log_error(f"Critical error in Cross Chain Arbitrage Bot: {e}")
-            handle_errors(e)
-
-    def stop(self):
-        """Stops the cross-chain arbitrage bot."""
-        logger.log_info("Stopping Cross Chain Arbitrage Bot...")
-        self.running = False
-
-if __name__ == "__main__":
-    bot = CrossChainArbitrageBot()
-    asyncio.run(bot.run())
+            self.logger.info("No cross-chain arbitrage executed; no suitable opportunity detected.")

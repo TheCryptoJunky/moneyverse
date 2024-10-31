@@ -1,80 +1,102 @@
-# Full file path: /moneyverse/managers/goal_manager.py
+# moneyverse/managers/goal_manager.py
 
 import logging
-
-# Set up centralized logging
-logger = logging.getLogger(__name__)
+from typing import Dict
 
 class GoalManager:
     """
-    Manages trading and strategy goals, including adding, removing, and retrieving structured goals.
+    Manages adaptive trading goals such as profit targets, risk limits, and trade frequency.
+
+    Attributes:
+    - profit_target (float): Desired profit target as a percentage.
+    - risk_limit (float): Maximum acceptable risk per trade as a percentage.
+    - trade_frequency (int): Desired frequency of trades within a given period.
+    - logger (Logger): Logs goal setting and updates.
     """
 
-    def __init__(self, config):
-        self.config = config
-        self.goals = []
+    def __init__(self, profit_target=0.05, risk_limit=0.02, trade_frequency=10):
+        self.profit_target = profit_target  # 5% profit target
+        self.risk_limit = risk_limit  # 2% risk per trade limit
+        self.trade_frequency = trade_frequency  # Default trade frequency
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"GoalManager initialized with profit target: {self.profit_target * 100}%, "
+                         f"risk limit: {self.risk_limit * 100}%, trade frequency: {self.trade_frequency}")
 
-    def add_goal(self, goal, priority="medium", status="pending"):
+    def update_goal(self, goal_name: str, value: float):
         """
-        Add a structured goal to the manager.
+        Updates a specified trading goal.
 
-        Parameters:
-            goal (str): Description of the goal.
-            priority (str): Priority of the goal ("low", "medium", "high").
-            status (str): Status of the goal ("pending", "in_progress", "completed").
+        Args:
+        - goal_name (str): Name of the goal to update ("profit_target", "risk_limit", or "trade_frequency").
+        - value (float): New value for the specified goal.
         """
-        structured_goal = {
-            "description": goal,
-            "priority": priority,
-            "status": status
-        }
-        self.goals.append(structured_goal)
-        logger.info(f"Added goal: {structured_goal}")
+        if goal_name == "profit_target":
+            self.profit_target = value
+            self.logger.info(f"Updated profit target to {self.profit_target * 100}%")
+        elif goal_name == "risk_limit":
+            self.risk_limit = value
+            self.logger.info(f"Updated risk limit to {self.risk_limit * 100}%")
+        elif goal_name == "trade_frequency":
+            self.trade_frequency = int(value)
+            self.logger.info(f"Updated trade frequency to {self.trade_frequency}")
+        else:
+            self.logger.warning(f"Goal '{goal_name}' not recognized. No update performed.")
 
-    def remove_goal(self, goal_description):
+    def evaluate_performance(self, current_profit: float) -> bool:
         """
-        Remove a goal from the manager based on the description.
+        Evaluates current profit against the profit target to determine if adjustments are needed.
 
-        Parameters:
-            goal_description (str): Description of the goal to remove.
-        """
-        for goal in self.goals:
-            if goal["description"] == goal_description:
-                self.goals.remove(goal)
-                logger.info(f"Removed goal: {goal}")
-                return
-        logger.warning(f"Goal not found: {goal_description}")
+        Args:
+        - current_profit (float): Current profit as a percentage.
 
-    def update_goal_status(self, goal_description, new_status):
-        """
-        Update the status of a specified goal.
-
-        Parameters:
-            goal_description (str): Description of the goal to update.
-            new_status (str): New status of the goal ("pending", "in_progress", "completed").
-        """
-        for goal in self.goals:
-            if goal["description"] == goal_description:
-                old_status = goal["status"]
-                goal["status"] = new_status
-                logger.info(f"Updated goal '{goal_description}' status from '{old_status}' to '{new_status}'")
-                return
-        logger.warning(f"Goal not found: {goal_description}")
-
-    def get_goals(self, status=None, priority=None):
-        """
-        Retrieve goals, optionally filtering by status and priority.
-
-        Parameters:
-            status (str, optional): Filter goals by status.
-            priority (str, optional): Filter goals by priority.
-        
         Returns:
-            List[Dict]: List of goals matching the specified filters.
+        - bool: True if profit target is met or exceeded, False otherwise.
         """
-        filtered_goals = [
-            goal for goal in self.goals
-            if (status is None or goal["status"] == status) and (priority is None or goal["priority"] == priority)
-        ]
-        logger.info(f"Retrieved goals with status={status} and priority={priority}: {filtered_goals}")
-        return filtered_goals
+        if current_profit >= self.profit_target:
+            self.logger.info(f"Profit target of {self.profit_target * 100}% met. Current profit: {current_profit * 100}%.")
+            return True
+        self.logger.debug("Profit target not yet met.")
+        return False
+
+    def risk_exceeded(self, current_risk: float) -> bool:
+        """
+        Checks if the current risk exceeds the defined risk limit.
+
+        Args:
+        - current_risk (float): Current risk level as a percentage.
+
+        Returns:
+        - bool: True if risk limit is exceeded, False otherwise.
+        """
+        if current_risk > self.risk_limit:
+            self.logger.warning(f"Risk limit exceeded. Current risk: {current_risk * 100}%, limit: {self.risk_limit * 100}%.")
+            return True
+        self.logger.debug("Risk limit within acceptable bounds.")
+        return False
+
+    def adjust_trade_frequency(self, market_condition: str):
+        """
+        Adjusts trade frequency based on market conditions.
+
+        Args:
+        - market_condition (str): Describes current market condition (e.g., "volatile", "stable").
+        """
+        if market_condition == "volatile":
+            self.trade_frequency = max(1, int(self.trade_frequency * 0.5))  # Reduce frequency
+            self.logger.info(f"Market is volatile. Reducing trade frequency to {self.trade_frequency}.")
+        elif market_condition == "stable":
+            self.trade_frequency = int(self.trade_frequency * 1.2)  # Increase frequency
+            self.logger.info(f"Market is stable. Increasing trade frequency to {self.trade_frequency}.")
+
+    def get_goals(self) -> Dict[str, float]:
+        """
+        Retrieves the current set of goals.
+
+        Returns:
+        - dict: Dictionary containing current goals.
+        """
+        return {
+            "profit_target": self.profit_target,
+            "risk_limit": self.risk_limit,
+            "trade_frequency": self.trade_frequency
+        }

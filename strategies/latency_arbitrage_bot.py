@@ -1,128 +1,86 @@
-# Full file path: /moneyverse/strategies/latency_arbitrage_bot.py
+# moneyverse/strategies/latency_arbitrage_bot.py
 
-import asyncio
-from ai.agents.rl_agent import RLTradingAgent
-from centralized_logger import CentralizedLogger
-from src.managers.transaction_manager import TransactionManager
-from src.managers.risk_manager import RiskManager
-from market_data import MarketDataAPI
-from src.safety.safety_manager import SafetyManager
-from src.utils.error_handler import handle_errors
-from ai.rl_algorithms import DDPGAgent, PPOAgent, LSTM_MemoryAgent, MARLAgent
-
-# Initialize components
-logger = CentralizedLogger()
-transaction_manager = TransactionManager()
-risk_manager = RiskManager()
-safety_manager = SafetyManager()
-market_data_api = MarketDataAPI()
-
-# Initialize multiple RL agents for dynamic selection, including memory-based LSTM
-ddpg_agent = DDPGAgent(environment="latency_arbitrage")
-ppo_agent = PPOAgent(environment="latency_arbitrage")
-lstm_agent = LSTM_MemoryAgent(environment="latency_arbitrage")
-marl_agent = MARLAgent(environment="latency_arbitrage")
-
-# Track performance for each agent
-agent_performance = {"DDPG": 0, "PPO": 0, "LSTM": 0, "MARL": 0}
+import logging
+from typing import Dict
 
 class LatencyArbitrageBot:
-    def __init__(self):
-        self.running = True
-        self.rl_agent = None
-        self.select_agent()  # Initialize with the best performing agent
+    """
+    Detects and executes latency arbitrage opportunities by exploiting price discrepancies due to latency between exchanges.
 
-    def select_agent(self):
-        """Select the best-performing agent based on recent trade performance."""
-        best_agent_name = max(agent_performance, key=agent_performance.get)
-        self.rl_agent = {
-            "DDPG": ddpg_agent,
-            "PPO": ppo_agent,
-            "LSTM": lstm_agent,
-            "MARL": marl_agent,
-        }[best_agent_name]
-        logger.log_info(f"Selected agent: {best_agent_name}")
+    Attributes:
+    - threshold (float): Minimum price difference required to trigger latency arbitrage.
+    - logger (Logger): Logs bot actions and detected opportunities.
+    """
 
-    async def fetch_market_data(self):
-        """Fetch market data across exchanges for latency arbitrage opportunities."""
-        try:
-            market_data = await market_data_api.get_latency_arbitrage_data()
-            logger.log_info(f"Fetched latency arbitrage market data: {market_data}")
-            return market_data
-        except Exception as e:
-            logger.log_error(f"Failed to fetch market data: {e}")
-            handle_errors(e)
-            return None
+    def __init__(self, threshold=0.01):
+        self.threshold = threshold  # Minimum profit margin to trigger arbitrage
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"LatencyArbitrageBot initialized with threshold: {self.threshold * 100}%")
 
-    def ai_decision(self, market_data):
-        """Make an AI-driven trading decision using the selected RL agent."""
-        try:
-            action = self.rl_agent.decide_action(market_data)
-            logger.log_info(f"AI decision by {self.rl_agent.__class__.__name__}: {action}")
-            return action
-        except Exception as e:
-            logger.log_error(f"Error in AI decision-making: {e}")
-            handle_errors(e)
-            return None
+    def detect_opportunity(self, market_data: Dict[str, float]) -> Dict[str, float]:
+        """
+        Detects latency arbitrage opportunities between markets.
 
-    async def execute_trade(self, trade_data):
-        """Execute the trade and update agent performance based on success or failure."""
-        trade_success = await transaction_manager.execute_trade(trade_data)
-        agent_type = self.rl_agent.__class__.__name__
+        Args:
+        - market_data (dict): Market prices across different exchanges, keyed by market name.
 
-        if trade_success:
-            logger.log_info(f"Trade executed successfully: {trade_data}")
-            agent_performance[agent_type] += 1  # Reward successful trade
+        Returns:
+        - dict: Details of the arbitrage opportunity if detected.
+        """
+        markets = list(market_data.keys())
+        opportunities = {}
+
+        for i in range(len(markets)):
+            for j in range(i + 1, len(markets)):
+                market1, market2 = markets[i], markets[j]
+                price1, price2 = market_data[market1], market_data[market2]
+
+                # Identify profitable latency arbitrage opportunities
+                if price2 > price1 * (1 + self.threshold):
+                    opportunities = {'buy_market': market1, 'sell_market': market2, 'profit': price2 - price1}
+                    self.logger.info(f"Latency arbitrage detected: Buy from {market1}, sell on {market2}, profit: {opportunities['profit']}")
+                    return opportunities
+                elif price1 > price2 * (1 + self.threshold):
+                    opportunities = {'buy_market': market2, 'sell_market': market1, 'profit': price1 - price2}
+                    self.logger.info(f"Latency arbitrage detected: Buy from {market2}, sell on {market1}, profit: {opportunities['profit']}")
+                    return opportunities
+
+        self.logger.debug("No latency arbitrage opportunities detected.")
+        return opportunities
+
+    def execute_arbitrage(self, wallet, opportunity: Dict[str, float], amount: float):
+        """
+        Executes a latency arbitrage trade based on detected opportunity.
+
+        Args:
+        - wallet (Wallet): Wallet instance to execute the trade.
+        - opportunity (dict): Details of the detected latency arbitrage opportunity.
+        - amount (float): Amount to trade.
+        """
+        if not opportunity:
+            self.logger.warning("No opportunity available for latency arbitrage execution.")
+            return
+
+        buy_market = opportunity['buy_market']
+        sell_market = opportunity['sell_market']
+        profit = opportunity['profit']
+
+        # Simulate trade execution by updating wallet balances
+        wallet.update_balance(buy_market, -amount)
+        wallet.update_balance(sell_market, amount * (1 + self.threshold))
+        self.logger.info(f"Executed latency arbitrage: Bought {amount} on {buy_market}, sold on {sell_market}, profit: {profit}.")
+
+    def run(self, wallet, market_data: Dict[str, float], amount: float):
+        """
+        Detects and executes latency arbitrage if profitable opportunities are available.
+
+        Args:
+        - wallet (Wallet): Wallet instance to execute the trade.
+        - market_data (dict): Market prices to analyze for latency arbitrage.
+        - amount (float): Amount to trade if an opportunity is detected.
+        """
+        opportunity = self.detect_opportunity(market_data)
+        if opportunity:
+            self.execute_arbitrage(wallet, opportunity, amount)
         else:
-            logger.log_warning(f"Trade failed: {trade_data}")
-            agent_performance[agent_type] -= 1  # Penalize failed trade
-
-    async def run(self):
-        """Main loop to operate the latency arbitrage bot with dynamic agent switching."""
-        logger.log_info("Starting Latency Arbitrage Bot with dynamic agent selection...")
-        try:
-            while self.running:
-                # Re-evaluate and select the best-performing agent if necessary
-                if max(agent_performance.values()) != agent_performance[self.rl_agent.__class__.__name__]:
-                    self.select_agent()
-
-                market_data = await self.fetch_market_data()
-                if market_data is None:
-                    logger.log_warning("No market data available; retrying in 15 seconds.")
-                    await asyncio.sleep(15)
-                    continue
-
-                action = self.ai_decision(market_data)
-                if action is None:
-                    logger.log_warning("AI decision failed; retrying in 15 seconds.")
-                    await asyncio.sleep(15)
-                    continue
-
-                # Safety and risk checks before executing trades
-                if safety_manager.is_safe_to_proceed(trade_data=action):
-                    if risk_manager.is_risk_compliant(market_data):
-                        trade_data = {
-                            "source_wallet": action.get("source_wallet"),
-                            "amount": action.get("amount"),
-                            "trade_type": "latency_arbitrage"
-                        }
-                        await self.execute_trade(trade_data)
-                    else:
-                        logger.log_warning("Risk thresholds exceeded. Skipping trade execution.")
-                else:
-                    logger.log_warning("Safety check failed. Aborting trade execution.")
-
-                await asyncio.sleep(15)  # Shorter cycle for latency arbitrage
-
-        except Exception as e:
-            logger.log_error(f"Critical error in Latency Arbitrage Bot: {e}")
-            handle_errors(e)
-
-    def stop(self):
-        """Stops the latency arbitrage bot."""
-        logger.log_info("Stopping Latency Arbitrage Bot...")
-        self.running = False
-
-if __name__ == "__main__":
-    bot = LatencyArbitrageBot()
-    asyncio.run(bot.run())
+            self.logger.info("No latency arbitrage executed; no suitable opportunity detected.")

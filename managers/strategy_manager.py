@@ -1,88 +1,74 @@
+# moneyverse/managers/strategy_manager.py
+
 import logging
-from .arbitrage_strategy import ArbitrageStrategy
-from .sandwich_strategy import SandwichStrategy
-from .flash_loan_strategy import FlashLoanStrategy
-from .liquidity_provision_strategy import LiquidityProvisionStrategy
-from .statistical_arbitrage import StatisticalArbitrage
-from .revenge_strategy import RevengeStrategy
+from moneyverse.strategies.arbitrage_bot import ArbitrageBot
+from moneyverse.strategies.flash_loan_arbitrage_bot import FlashLoanArbitrageBot
+from moneyverse.strategies.front_running_bot import FrontRunningBot
+from moneyverse.strategies.mean_reversion_strategy import MeanReversionStrategy
+from moneyverse.safety.risk_manager import RiskManager
+from moneyverse.database.db_connection import DatabaseConnection
 
 class StrategyManager:
     """
-    Manages and executes trading strategies based on dynamic market conditions.
-    
+    Centralized manager to control and execute various trading strategies.
+
     Attributes:
-    - strategies (dict): Dictionary of available strategy instances.
-    - logger (Logger): Logger for tracking strategy execution.
+    - strategies (dict): Collection of available strategies, each initialized once.
+    - risk_manager (RiskManager): Ensures safety checks are passed before strategy execution.
+    - db (DatabaseConnection): Database connection for logging and performance tracking.
     """
 
-    def __init__(self):
-        self.strategies = {
-            "arbitrage": ArbitrageStrategy(),
-            "sandwich": SandwichStrategy(),
-            "flash_loan": FlashLoanStrategy(),
-            "liquidity_provision": LiquidityProvisionStrategy(),
-            "statistical_arbitrage": StatisticalArbitrage(),
-            "revenge": RevengeStrategy()
-        }
+    def __init__(self, db: DatabaseConnection):
         self.logger = logging.getLogger(__name__)
+        self.strategies = {
+            "arbitrage": ArbitrageBot(),
+            "flash_loan_arbitrage": FlashLoanArbitrageBot(),
+            "front_running": FrontRunningBot(),
+            "mean_reversion": MeanReversionStrategy()
+            # Add additional strategies as necessary
+        }
+        self.risk_manager = RiskManager(db)
+        self.db = db
         self.logger.info("StrategyManager initialized with available strategies.")
 
-    def select_strategy(self, condition: str):
+    def execute_strategy(self, strategy_name: str, **kwargs):
         """
-        Selects strategies based on current market condition.
+        Executes a specified strategy after performing safety checks.
 
         Args:
-        - condition (str): Market condition like 'volatile', 'bullish', etc.
-
-        Returns:
-        - list: List of strategies appropriate for the condition.
-        """
-        selected_strategies = []
-        if condition == "volatile":
-            selected_strategies = [self.strategies["flash_loan"], self.strategies["sandwich"]]
-        elif condition == "bullish":
-            selected_strategies = [self.strategies["arbitrage"], self.strategies["liquidity_provision"]]
-        elif condition == "neutral":
-            selected_strategies = [self.strategies["statistical_arbitrage"], self.strategies["revenge"]]
-        
-        self.logger.info(f"Selected strategies for {condition} market: {[s.__class__.__name__ for s in selected_strategies]}")
-        return selected_strategies
-
-    def execute_strategy(self, wallet, strategy_name: str):
-        """
-        Executes a specified strategy for a given wallet.
-
-        Args:
-        - wallet (Wallet): Wallet instance for strategy execution.
         - strategy_name (str): Name of the strategy to execute.
+        - **kwargs: Additional parameters specific to the strategy.
         """
         strategy = self.strategies.get(strategy_name)
-        if strategy:
-            strategy.execute(wallet)
-            self.logger.info(f"Executed {strategy_name} strategy for wallet {wallet.address}")
-        else:
-            self.logger.warning(f"Strategy {strategy_name} not found.")
+        if not strategy:
+            self.logger.error(f"Strategy {strategy_name} not found.")
+            return
+        
+        # Perform risk checks before execution
+        if not self.risk_manager.is_safe_to_execute(strategy_name):
+            self.logger.warning(f"Risk Manager blocked execution for {strategy_name}")
+            return
 
-    def execute_selected_strategies(self, wallets, condition: str):
+        # Execute strategy and log completion
+        self.logger.info(f"Executing {strategy_name} strategy.")
+        strategy.run(**kwargs)
+        self.logger.info(f"Completed execution of {strategy_name} strategy.")
+    
+    def execute_all_strategies(self, **kwargs):
         """
-        Executes selected strategies on a list of wallets based on market conditions.
-
-        Args:
-        - wallets (list): List of Wallet objects.
-        - condition (str): Market condition guiding strategy selection.
-        """
-        selected_strategies = self.select_strategy(condition)
-        for strategy in selected_strategies:
-            for wallet in wallets:
-                strategy.execute(wallet)
-                self.logger.info(f"Executed {strategy.__class__.__name__} on wallet {wallet.address}.")
-
-    def log_strategy_performance(self, strategy_name: str, performance: dict):
-        """
-        Logs the performance of a strategy.
+        Executes all available strategies in parallel, after individual safety checks.
 
         Args:
-        - strategy_name (str): Name of the strategy.
-        - performance (dict): Performance metrics to log.
+        - **kwargs: Parameters passed to each strategy's execution method.
         """
-        self.logger.info(f"Performance for {strategy_name}: {performance}")
+        for strategy_name in self.strategies.keys():
+            self.execute_strategy(strategy_name, **kwargs)
+
+    def stop_all_strategies(self):
+        """
+        Gracefully stops all running strategies, if they have a stop method.
+        """
+        for strategy in self.strategies.values():
+            if hasattr(strategy, "stop"):
+                strategy.stop()
+        self.logger.info("Stopped all strategies.")

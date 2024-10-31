@@ -1,117 +1,88 @@
+# moneyverse/strategies/arbitrage_bot.py
+
 import logging
-from decimal import Decimal
-from ..database.db_connection import DatabaseConnection
-from ..algorithms.reinforcement_learning_agent import ReinforcementAgent
+from typing import Dict
 
 class ArbitrageBot:
     """
-    An arbitrage bot that identifies and executes arbitrage opportunities across multiple markets.
+    Executes arbitrage strategies across multiple markets and chains to capture price discrepancies.
 
     Attributes:
-    - db (DatabaseConnection): Database connection for data logging.
-    - reinforcement_agent (ReinforcementAgent): AI agent for adaptive threshold management.
-    - thresholds (dict): Arbitrage thresholds dynamically set by RL agent.
+    - threshold (float): Minimum price difference required to trigger an arbitrage trade.
+    - logger (Logger): Logs actions and detected opportunities.
     """
 
-    def __init__(self, db: DatabaseConnection):
-        self.db = db
-        self.reinforcement_agent = ReinforcementAgent()
-        self.thresholds = {"min_profit_margin": 0.01, "max_risk_tolerance": 0.02}
+    def __init__(self, threshold=0.01):
+        self.threshold = threshold  # e.g., 1% minimum profit margin
         self.logger = logging.getLogger(__name__)
+        self.logger.info("ArbitrageBot initialized with threshold: {:.2%}".format(self.threshold))
 
-    def update_thresholds(self, recent_performance: float):
+    def detect_opportunity(self, market_data: Dict[str, float]) -> Dict[str, float]:
         """
-        Updates arbitrage thresholds based on recent performance using reinforcement learning.
+        Identifies arbitrage opportunities based on market data.
 
         Args:
-        - recent_performance (float): Performance metric to guide RL adjustments.
-        """
-        updated_thresholds = self.reinforcement_agent.prioritize_strategies(self.thresholds)
-        self.thresholds.update(updated_thresholds)
-        self.logger.info(f"Updated arbitrage thresholds: {self.thresholds}")
-
-    def identify_opportunities(self, market_data: dict) -> list:
-        """
-        Identifies arbitrage opportunities in given market data.
-
-        Args:
-        - market_data (dict): Market data containing prices across exchanges.
+        - market_data (dict): Prices across different markets, keyed by market name.
 
         Returns:
-        - list: List of arbitrage opportunities.
+        - dict: Contains buy and sell market info if an opportunity is detected.
         """
-        opportunities = []
-        for asset, exchanges in market_data.items():
-            prices = [Decimal(exchange["price"]) for exchange in exchanges]
-            min_price, max_price = min(prices), max(prices)
-            potential_profit = (max_price - min_price) / min_price
+        markets = list(market_data.keys())
+        opportunities = {}
 
-            if potential_profit >= self.thresholds["min_profit_margin"]:
-                opportunities.append({
-                    "asset": asset,
-                    "buy_price": min_price,
-                    "sell_price": max_price,
-                    "profit_margin": potential_profit
-                })
-                self.logger.info(f"Arbitrage opportunity found for {asset} with profit margin {potential_profit}.")
+        for i in range(len(markets)):
+            for j in range(i + 1, len(markets)):
+                buy_market, sell_market = markets[i], markets[j]
+                buy_price, sell_price = market_data[buy_market], market_data[sell_market]
+
+                if sell_price > buy_price * (1 + self.threshold):
+                    opportunities = {'buy_market': buy_market, 'sell_market': sell_market, 'profit': sell_price - buy_price}
+                    self.logger.info(f"Arbitrage detected: Buy from {buy_market}, sell to {sell_market} for profit of {opportunities['profit']}")
+                    return opportunities
+                
+                elif buy_price > sell_price * (1 + self.threshold):
+                    opportunities = {'buy_market': sell_market, 'sell_market': buy_market, 'profit': buy_price - sell_price}
+                    self.logger.info(f"Arbitrage detected: Buy from {sell_market}, sell to {buy_market} for profit of {opportunities['profit']}")
+                    return opportunities
+
+        self.logger.debug("No arbitrage opportunities detected.")
         return opportunities
 
-    async def execute(self, wallet):
+    def execute_arbitrage(self, wallet, opportunity: Dict[str, float], amount: float):
         """
-        Executes identified arbitrage opportunities using the wallet for transactions.
+        Executes an arbitrage by buying and selling across markets with a detected opportunity.
 
         Args:
-        - wallet (Wallet): Wallet instance used for transactions.
-        
-        Returns:
-        - float: Total profit earned from arbitrage trades.
+        - wallet (Wallet): Wallet to use for the transaction.
+        - opportunity (dict): Contains buy/sell markets and expected profit.
+        - amount (float): Amount to trade.
         """
-        market_data = await self.fetch_market_data()
-        opportunities = self.identify_opportunities(market_data)
-        total_profit = 0.0
+        if not opportunity:
+            self.logger.warning("No opportunity available for execution.")
+            return
 
-        for opportunity in opportunities:
-            if await self.execute_trade(wallet, opportunity):
-                profit = float(opportunity["profit_margin"] * opportunity["buy_price"])
-                total_profit += profit
-                self.reinforcement_agent.update_strategy_performance("arbitrage", profit)
-                self.logger.info(f"Executed arbitrage trade for {opportunity['asset']} with profit {profit}.")
+        buy_market, sell_market = opportunity['buy_market'], opportunity['sell_market']
+        profit = opportunity['profit']
 
-        self.update_thresholds(total_profit)
-        return total_profit
-
-    async def fetch_market_data(self) -> dict:
-        """
-        Fetches current market data across exchanges for arbitrage analysis.
-
-        Returns:
-        - dict: Market data with asset prices from different exchanges.
-        """
-        # Placeholder function for market data retrieval
-        market_data = {
-            "BTC": [{"exchange": "ExchangeA", "price": "60000"}, {"exchange": "ExchangeB", "price": "60500"}],
-            "ETH": [{"exchange": "ExchangeA", "price": "4000"}, {"exchange": "ExchangeB", "price": "4100"}],
-        }
-        self.logger.info("Fetched market data for arbitrage analysis.")
-        return market_data
-
-    async def execute_trade(self, wallet, opportunity: dict) -> bool:
-        """
-        Executes a trade based on the arbitrage opportunity.
-
-        Args:
-        - wallet (Wallet): Wallet to execute the trade.
-        - opportunity (dict): Arbitrage opportunity with asset, buy price, and sell price.
-
-        Returns:
-        - bool: True if trade was successful, False otherwise.
-        """
-        # Placeholder for actual trading logic; should interact with exchanges via wallet
-        if wallet.get_balance() > opportunity["buy_price"]:
-            wallet.update_balance(-opportunity["buy_price"])
-            wallet.update_balance(opportunity["sell_price"])
-            self.logger.info(f"Trade executed for {opportunity['asset']}")
-            return True
+        # Execute simulated trade by updating wallet balances
+        if wallet.get_balance(buy_market) >= amount:
+            wallet.update_balance(buy_market, -amount)
+            wallet.update_balance(sell_market, amount * (1 + self.threshold))
+            self.logger.info(f"Executed arbitrage: Bought {amount} on {buy_market}, sold on {sell_market}, for profit of {profit}.")
         else:
-            self.logger.warning(f"Insufficient balance for trade on {opportunity['asset']}.")
-            return False
+            self.logger.warning(f"Insufficient balance in {buy_market} for arbitrage.")
+
+    def run(self, wallet, market_data: Dict[str, float], amount: float):
+        """
+        Detects and executes arbitrage opportunities in a specified wallet.
+
+        Args:
+        - wallet (Wallet): Wallet instance for execution.
+        - market_data (dict): Prices across multiple markets.
+        - amount (float): Amount to trade if an opportunity is detected.
+        """
+        opportunity = self.detect_opportunity(market_data)
+        if opportunity:
+            self.execute_arbitrage(wallet, opportunity, amount)
+        else:
+            self.logger.info("No arbitrage executed; no suitable opportunity detected.")
