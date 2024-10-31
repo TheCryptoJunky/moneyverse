@@ -1,128 +1,84 @@
-# Full file path: /moneyverse/strategies/liquidity_provision_arbitrage_bot.py
+# moneyverse/strategies/liquidity_provision_arbitrage_bot.py
 
+import logging
 import asyncio
-from ai.agents.rl_agent import RLTradingAgent
-from centralized_logger import CentralizedLogger
-from src.managers.transaction_manager import TransactionManager
-from src.managers.risk_manager import RiskManager
-from market_data import MarketDataAPI
-from src.safety.safety_manager import SafetyManager
-from src.utils.error_handler import handle_errors
-from ai.rl_algorithms import DDPGAgent, PPOAgent, LSTM_MemoryAgent, MARLAgent
-
-# Initialize components
-logger = CentralizedLogger()
-transaction_manager = TransactionManager()
-risk_manager = RiskManager()
-safety_manager = SafetyManager()
-market_data_api = MarketDataAPI()
-
-# Initialize multiple RL agents for dynamic selection, including memory-based LSTM
-ddpg_agent = DDPGAgent(environment="liquidity_provision_arbitrage")
-ppo_agent = PPOAgent(environment="liquidity_provision_arbitrage")
-lstm_agent = LSTM_MemoryAgent(environment="liquidity_provision_arbitrage")
-marl_agent = MARLAgent(environment="liquidity_provision_arbitrage")
-
-# Track performance for each agent
-agent_performance = {"DDPG": 0, "PPO": 0, "LSTM": 0, "MARL": 0}
+from typing import Callable
 
 class LiquidityProvisionArbitrageBot:
-    def __init__(self):
-        self.running = True
-        self.rl_agent = None
-        self.select_agent()  # Initialize with the best performing agent
+    """
+    Executes liquidity provision arbitrage by adding or removing liquidity based on pool conditions.
 
-    def select_agent(self):
-        """Select the best-performing agent based on recent trade performance."""
-        best_agent_name = max(agent_performance, key=agent_performance.get)
-        self.rl_agent = {
-            "DDPG": ddpg_agent,
-            "PPO": ppo_agent,
-            "LSTM": lstm_agent,
-            "MARL": marl_agent,
-        }[best_agent_name]
-        logger.log_info(f"Selected agent: {best_agent_name}")
+    Attributes:
+    - pool_monitor (Callable): Function to monitor liquidity pools for arbitrage conditions.
+    - liquidity_executor (Callable): Function to add or remove liquidity in targeted pools.
+    - logger (Logger): Logs arbitrage actions and detected opportunities.
+    """
 
-    async def fetch_market_data(self):
-        """Fetch market data specifically for liquidity provision opportunities."""
-        try:
-            market_data = await market_data_api.get_liquidity_data()
-            logger.log_info(f"Fetched market data: {market_data}")
-            return market_data
-        except Exception as e:
-            logger.log_error(f"Failed to fetch market data: {e}")
-            handle_errors(e)
-            return None
+    def __init__(self, pool_monitor: Callable, liquidity_executor: Callable):
+        self.pool_monitor = pool_monitor
+        self.liquidity_executor = liquidity_executor
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("LiquidityProvisionArbitrageBot initialized.")
 
-    def ai_decision(self, market_data):
-        """Make an AI-driven trading decision using the selected RL agent."""
-        try:
-            action = self.rl_agent.decide_action(market_data)
-            logger.log_info(f"AI decision by {self.rl_agent.__class__.__name__}: {action}")
-            return action
-        except Exception as e:
-            logger.log_error(f"Error in AI decision-making: {e}")
-            handle_errors(e)
-            return None
+    async def monitor_liquidity_pools(self):
+        """
+        Continuously monitors liquidity pools for arbitrage conditions.
+        """
+        self.logger.info("Monitoring liquidity pools for arbitrage conditions.")
+        while True:
+            opportunity = await self.pool_monitor()
+            if opportunity:
+                await self.execute_liquidity_arbitrage(opportunity)
+            await asyncio.sleep(0.5)  # Set for frequent checks
 
-    async def execute_trade(self, trade_data):
-        """Execute the trade and update agent performance based on success or failure."""
-        trade_success = await transaction_manager.execute_trade(trade_data)
-        agent_type = self.rl_agent.__class__.__name__
+    async def execute_liquidity_arbitrage(self, opportunity: dict):
+        """
+        Executes a liquidity provision arbitrage based on detected opportunity.
 
-        if trade_success:
-            logger.log_info(f"Trade executed successfully: {trade_data}")
-            agent_performance[agent_type] += 1  # Reward successful trade
+        Args:
+        - opportunity (dict): Data on the target liquidity pool and conditions.
+        """
+        asset = opportunity.get("asset")
+        pool_id = opportunity.get("pool_id")
+        action = opportunity.get("action")  # "add" or "remove"
+        self.logger.info(f"Executing {action} liquidity for {asset} in pool {pool_id}")
+
+        # Execute the liquidity action (add/remove) in the pool
+        success = await self.liquidity_executor(asset, pool_id, action)
+        if success:
+            self.logger.info(f"{action.capitalize()} liquidity succeeded for {asset} in pool {pool_id}")
         else:
-            logger.log_warning(f"Trade failed: {trade_data}")
-            agent_performance[agent_type] -= 1  # Penalize failed trade
+            self.logger.warning(f"{action.capitalize()} liquidity failed for {asset} in pool {pool_id}")
 
-    async def run(self):
-        """Main loop to operate the liquidity provision arbitrage bot with dynamic agent switching."""
-        logger.log_info("Starting Liquidity Provision Arbitrage Bot with dynamic agent selection...")
-        try:
-            while self.running:
-                # Re-evaluate and select the best-performing agent if necessary
-                if max(agent_performance.values()) != agent_performance[self.rl_agent.__class__.__name__]:
-                    self.select_agent()
+    # ---------------- Opportunity Handler for Mempool Integration Starts Here ----------------
+    def handle_liquidity_arbitrage_opportunity(self, opportunity: dict):
+        """
+        Responds to detected liquidity provision arbitrage opportunities from MempoolMonitor.
 
-                market_data = await self.fetch_market_data()
-                if market_data is None:
-                    logger.log_warning("No market data available; retrying in 60 seconds.")
-                    await asyncio.sleep(60)
-                    continue
+        Args:
+        - opportunity (dict): Opportunity data detected by the MempoolMonitor.
+        """
+        asset = opportunity.get("asset")
+        pool_id = opportunity.get("pool_id")
+        action = opportunity.get("action")
 
-                action = self.ai_decision(market_data)
-                if action is None:
-                    logger.log_warning("AI decision failed; retrying in 60 seconds.")
-                    await asyncio.sleep(60)
-                    continue
+        self.logger.info(f"Liquidity provision arbitrage opportunity detected for {asset} in pool {pool_id} with action {action}")
 
-                # Safety and risk checks before executing trades
-                if safety_manager.is_safe_to_proceed(trade_data=action):
-                    if risk_manager.is_risk_compliant(market_data):
-                        trade_data = {
-                            "source_wallet": action.get("source_wallet"),
-                            "amount": action.get("amount"),
-                            "trade_type": "liquidity_provision"
-                        }
-                        await self.execute_trade(trade_data)
-                    else:
-                        logger.log_warning("Risk thresholds exceeded. Skipping trade execution.")
-                else:
-                    logger.log_warning("Safety check failed. Aborting trade execution.")
+        # Execute liquidity arbitrage asynchronously
+        asyncio.create_task(self.execute_liquidity_arbitrage(opportunity))
+    # ---------------- Opportunity Handler Ends Here ----------------
 
-                await asyncio.sleep(60)  # Delay for the next cycle based on liquidity timing
+    # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
+    def handle_flash_loan_opportunity(self, opportunity: dict):
+        """
+        Responds to detected flash loan opportunities from FlashLoanMonitor.
 
-        except Exception as e:
-            logger.log_error(f"Critical error in Liquidity Provision Arbitrage Bot: {e}")
-            handle_errors(e)
+        Args:
+        - opportunity (dict): Opportunity data detected by FlashLoanMonitor.
+        """
+        asset = opportunity.get("asset")
+        amount = opportunity.get("amount")
 
-    def stop(self):
-        """Stops the liquidity provision arbitrage bot."""
-        logger.log_info("Stopping Liquidity Provision Arbitrage Bot...")
-        self.running = False
-
-if __name__ == "__main__":
-    bot = LiquidityProvisionArbitrageBot()
-    asyncio.run(bot.run())
+        self.logger.info(f"Flash loan opportunity detected for liquidity provision on {asset} with amount {amount}")
+        asyncio.create_task(self.request_flash_loan(asset, amount))  # Trigger flash loan asynchronously
+    # ---------------- Opportunity Handler for Flash Loan Integration Ends Here ----------------

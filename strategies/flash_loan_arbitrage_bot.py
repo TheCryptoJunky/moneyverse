@@ -1,7 +1,7 @@
 # moneyverse/strategies/flash_loan_arbitrage_bot.py
 
 import logging
-from typing import Dict, Callable
+from typing import Callable
 import asyncio
 
 class FlashLoanArbitrageBot:
@@ -91,3 +91,18 @@ class FlashLoanArbitrageBot:
         self.logger.info(f"Flash loan arbitrage opportunity detected for {asset} with amount {amount}")
         asyncio.create_task(self.request_flash_loan(asset, amount))  # Trigger flash loan asynchronously
     # ---------------- Opportunity Handler Ends Here ----------------
+
+    # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
+    def handle_flash_loan_opportunity(self, opportunity: dict):
+        """
+        Responds to detected flash loan opportunities from FlashLoanMonitor.
+
+        Args:
+        - opportunity (dict): Opportunity data detected by FlashLoanMonitor.
+        """
+        asset = opportunity.get("asset")
+        amount = opportunity.get("amount")
+        
+        self.logger.info(f"Flash loan opportunity detected for {asset} with amount {amount}")
+        asyncio.create_task(self.request_flash_loan(asset, amount))  # Trigger flash loan asynchronously
+    # ---------------- Opportunity Handler for Flash Loan Integration Ends Here ----------------

@@ -1,93 +1,84 @@
 # moneyverse/strategies/moving_average_crossover_strategy.py
 
 import logging
-from typing import List
+import asyncio
+from typing import Callable
 
-class MovingAverageCrossoverStrategy:
+class MovingAverageCrossoverStrategyBot:
     """
-    Detects buying and selling signals based on the crossover of short-term and long-term moving averages.
+    Executes a moving average crossover strategy by entering trades when short-term moving averages cross long-term moving averages.
 
     Attributes:
-    - short_window (int): Period for the short-term moving average.
-    - long_window (int): Period for the long-term moving average.
-    - logger (Logger): Logs bot actions and detected opportunities.
+    - ma_monitor (Callable): Function to monitor moving average conditions for crossovers.
+    - trade_executor (Callable): Function to execute trades based on crossover conditions.
+    - logger (Logger): Logs crossover actions and detected opportunities.
     """
 
-    def __init__(self, short_window=10, long_window=50):
-        self.short_window = short_window  # Short-term moving average window
-        self.long_window = long_window  # Long-term moving average window
+    def __init__(self, ma_monitor: Callable, trade_executor: Callable):
+        self.ma_monitor = ma_monitor
+        self.trade_executor = trade_executor
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"MovingAverageCrossoverStrategy initialized with short window: {self.short_window}, long window: {self.long_window}")
+        self.logger.info("MovingAverageCrossoverStrategyBot initialized.")
 
-    def calculate_moving_average(self, prices: List[float], window: int) -> float:
+    async def monitor_moving_averages(self):
         """
-        Calculates the moving average for a given price history and window size.
+        Continuously monitors moving averages for crossover conditions.
+        """
+        self.logger.info("Monitoring moving averages for crossover conditions.")
+        while True:
+            opportunity = await self.ma_monitor()
+            if opportunity:
+                await self.execute_crossover_trade(opportunity)
+            await asyncio.sleep(0.5)  # Interval for frequent monitoring
+
+    async def execute_crossover_trade(self, opportunity: dict):
+        """
+        Executes a trade based on detected moving average crossover.
 
         Args:
-        - prices (list): List of historical prices.
-        - window (int): Number of data points to include in moving average calculation.
-
-        Returns:
-        - float: Calculated moving average of prices.
+        - opportunity (dict): Data on detected moving average crossover.
         """
-        if len(prices) < window:
-            self.logger.warning(f"Not enough data to calculate {window}-period moving average.")
-            return sum(prices) / len(prices)  # Fallback if less data available
-        moving_average = sum(prices[-window:]) / window
-        self.logger.debug(f"Calculated {window}-period moving average: {moving_average}")
-        return moving_average
+        asset = opportunity.get("asset")
+        trade_side = opportunity.get("trade_side")  # "buy" or "sell"
+        amount = opportunity.get("amount")
+        self.logger.info(f"Executing moving average crossover {trade_side} for {asset} with amount {amount}")
 
-    def detect_crossover(self, short_ma: float, long_ma: float) -> str:
-        """
-        Determines if there is a crossover between the short and long moving averages.
-
-        Args:
-        - short_ma (float): Short-term moving average.
-        - long_ma (float): Long-term moving average.
-
-        Returns:
-        - str: "buy" if short crosses above long, "sell" if short crosses below long, otherwise empty.
-        """
-        if short_ma > long_ma:
-            self.logger.info("Bullish crossover detected: Short MA above Long MA - Buy signal.")
-            return "buy"
-        elif short_ma < long_ma:
-            self.logger.info("Bearish crossover detected: Short MA below Long MA - Sell signal.")
-            return "sell"
-        self.logger.debug("No crossover detected.")
-        return ""
-
-    def execute_trade(self, wallet, action: str, amount: float, price: float):
-        """
-        Executes a trade based on the crossover signal.
-
-        Args:
-        - wallet (Wallet): Wallet instance to execute the trade.
-        - action (str): "buy" or "sell" action.
-        - amount (float): Amount of asset to trade.
-        - price (float): Current price at which to trade.
-        """
-        if action == "buy":
-            wallet.update_balance("buy", amount * price)
-            self.logger.info(f"Executed crossover buy trade for {amount} at {price}.")
-        elif action == "sell":
-            wallet.update_balance("sell", -amount * price)
-            self.logger.info(f"Executed crossover sell trade for {amount} at {price}.")
-
-    def run(self, wallet, price_history: List[float], current_price: float, amount: float):
-        """
-        Detects and executes trades based on moving average crossovers.
-
-        Args:
-        - wallet (Wallet): Wallet instance for executing trades.
-        - price_history (list): Historical price data for calculating moving averages.
-        - current_price (float): Current market price of the asset.
-        - amount (float): Amount to trade if an opportunity is detected.
-        """
-        short_ma = self.calculate_moving_average(price_history, self.short_window)
-        long_ma = self.calculate_moving_average(price_history, self.long_window)
-        action = self.detect_crossover(short_ma, long_ma)
-        if action:
-            self.execute_trade(wallet, action, amount, current_price)
+        # Execute the trade action based on crossover conditions
+        success = await self.trade_executor(asset, trade_side, amount)
+        if success:
+            self.logger.info(f"Moving average crossover trade succeeded for {asset}")
         else:
-            self.logger.info("No moving average crossover trade executed; no suitable opportunity detected.")
+            self.logger.warning(f"Moving average crossover trade failed for {asset}")
+
+    # ---------------- Opportunity Handler for Mempool Integration Starts Here ----------------
+    def handle_moving_average_crossover_opportunity(self, opportunity: dict):
+        """
+        Responds to detected moving average crossover opportunities from MempoolMonitor.
+
+        Args:
+        - opportunity (dict): Opportunity data detected by the MempoolMonitor.
+        """
+        asset = opportunity.get("asset")
+        trade_side = opportunity.get("trade_side")
+        amount = opportunity.get("amount")
+
+        self.logger.info(f"Moving average crossover opportunity detected for {asset} with action {trade_side} and amount {amount}")
+
+        # Execute moving average crossover trade asynchronously
+        asyncio.create_task(self.execute_crossover_trade(opportunity))
+    # ---------------- Opportunity Handler Ends Here ----------------
+
+    # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
+    def handle_flash_loan_opportunity(self, opportunity: dict):
+        """
+        Responds to detected flash loan opportunities from FlashLoanMonitor.
+
+        Args:
+        - opportunity (dict): Opportunity data detected by FlashLoanMonitor.
+        """
+        asset = opportunity.get("asset")
+        amount = opportunity.get("amount")
+
+        self.logger.info(f"Flash loan opportunity detected for moving average crossover on {asset} with amount {amount}")
+        asyncio.create_task(self.request_flash_loan(asset, amount))  # Trigger flash loan asynchronously
+    # ---------------- Opportunity Handler for Flash Loan Integration Ends Here ----------------

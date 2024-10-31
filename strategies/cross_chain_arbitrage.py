@@ -1,115 +1,122 @@
 # moneyverse/strategies/cross_chain_arbitrage.py
 
 import logging
-from typing import Dict, Callable
-import time
+import asyncio
+from typing import Callable
 
 class CrossChainArbitrageBot:
     """
-    Identifies and executes arbitrage opportunities across different blockchain networks.
+    Executes cross-chain arbitrage by detecting price discrepancies between different blockchain networks.
 
     Attributes:
-    - networks (dict): Supported blockchain networks with their exchange interfaces.
-    - arbitrage_threshold (float): Minimum profit percentage for triggering an arbitrage action.
-    - transfer_executor (callable): Function to handle cross-chain transfers.
-    - logger (Logger): Logs arbitrage actions, opportunities, and profits.
+    - price_fetcher (Callable): Function to fetch prices across blockchains.
+    - logger (Logger): Logs arbitrage actions and detected opportunities.
     """
 
-    def __init__(self, networks: Dict[str, Callable], arbitrage_threshold=0.02, transfer_executor: Callable = None):
-        self.networks = networks  # {network_name: exchange_interface_func}
-        self.arbitrage_threshold = arbitrage_threshold
-        self.transfer_executor = transfer_executor
+    def __init__(self, price_fetcher: Callable):
+        self.price_fetcher = price_fetcher  # Function to fetch prices across chains
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"CrossChainArbitrageBot initialized with threshold of {arbitrage_threshold * 100}%")
+        self.logger.info("CrossChainArbitrageBot initialized.")
 
-    def fetch_prices(self, asset: str) -> Dict[str, float]:
+    async def fetch_cross_chain_prices(self, asset: str) -> dict:
         """
-        Fetches prices for a specific asset across supported networks.
+        Fetches prices for the specified asset across different blockchains.
 
         Args:
         - asset (str): Asset symbol to fetch prices for.
 
         Returns:
-        - dict: Prices of the asset on each network.
+        - dict: Cross-chain prices of the asset.
         """
-        prices = {}
-        for network, exchange_func in self.networks.items():
-            try:
-                prices[network] = exchange_func(asset)
-                self.logger.debug(f"Fetched price for {asset} on {network}: {prices[network]}")
-            except Exception as e:
-                self.logger.error(f"Error fetching price for {asset} on {network}: {str(e)}")
-        return prices
+        try:
+            prices = await self.price_fetcher(asset)
+            self.logger.info(f"Fetched cross-chain prices for {asset}: {prices}")
+            return prices
+        except Exception as e:
+            self.logger.error(f"Error fetching cross-chain prices for {asset}: {e}")
+            return {}
 
-    def detect_arbitrage_opportunity(self, prices: Dict[str, float]) -> bool:
+    def detect_cross_chain_opportunity(self, prices: dict) -> bool:
         """
-        Detects arbitrage opportunities across networks.
+        Detects arbitrage opportunities based on cross-chain price discrepancies.
 
         Args:
-        - prices (dict): Asset prices on each network.
+        - prices (dict): Prices of the asset across blockchains.
 
         Returns:
         - bool: True if an arbitrage opportunity is detected, False otherwise.
         """
-        if len(prices) < 2:
-            self.logger.warning("Insufficient data for cross-chain arbitrage detection.")
-            return False
-
         max_price = max(prices.values())
         min_price = min(prices.values())
         spread = (max_price - min_price) / min_price
 
-        if spread >= self.arbitrage_threshold:
-            self.logger.info(f"Arbitrage opportunity detected with spread {spread * 100:.2f}% (Buy at {min_price}, Sell at {max_price})")
+        if spread >= 0.01:  # Example minimum spread threshold for cross-chain arbitrage
+            self.logger.info(f"Cross-chain arbitrage opportunity detected with spread: {spread * 100:.2f}%")
             return True
         return False
 
-    def execute_arbitrage(self, asset: str, source_network: str, destination_network: str, amount: float):
+    async def execute_cross_chain_arbitrage(self, asset: str, buy_chain: str, sell_chain: str, amount: float):
         """
-        Executes the arbitrage by transferring assets across chains and selling on the higher-priced network.
+        Executes cross-chain arbitrage by transferring assets between blockchains.
 
         Args:
-        - asset (str): Asset symbol for the arbitrage.
-        - source_network (str): Network to buy the asset.
-        - destination_network (str): Network to sell the asset.
-        - amount (float): Amount of the asset to transfer.
+        - asset (str): Asset symbol.
+        - buy_chain (str): Blockchain network to buy the asset on.
+        - sell_chain (str): Blockchain network to sell the asset on.
+        - amount (float): Amount of the asset to trade.
         """
-        self.logger.info(f"Executing arbitrage: {asset} from {source_network} to {destination_network} for amount {amount}")
+        self.logger.info(f"Executing cross-chain arbitrage: {asset} buy on {buy_chain}, sell on {sell_chain}")
+        # Placeholder for cross-chain transfer and trading logic
+        # Transfer asset from buy_chain to sell_chain and execute arbitrage trade
 
-        if self.transfer_executor:
-            success = self.transfer_executor(asset, source_network, destination_network, amount)
-            if success:
-                self.logger.info(f"Arbitrage executed successfully for {asset} ({amount}) from {source_network} to {destination_network}")
-            else:
-                self.logger.warning(f"Arbitrage execution failed for {asset} ({amount}) from {source_network} to {destination_network}")
-        else:
-            self.logger.error("Transfer executor function not defined. Cannot execute cross-chain transfer.")
-
-    def monitor_markets(self, asset: str, interval: float = 1.0):
+    async def run(self, asset: str, interval: float = 1.0):
         """
-        Continuously monitors markets for cross-chain arbitrage opportunities and executes when detected.
+        Continuously monitors for cross-chain arbitrage opportunities and executes trades.
 
         Args:
-        - asset (str): Asset symbol to monitor.
-        - interval (float): Time interval between market checks in seconds.
+        - asset (str): Asset to monitor for arbitrage.
+        - interval (float): Time interval between checks in seconds.
         """
-        self.logger.info(f"Starting cross-chain monitoring for {asset}")
+        self.logger.info(f"Starting cross-chain arbitrage monitoring for {asset}")
         while True:
-            prices = self.fetch_prices(asset)
-            if self.detect_arbitrage_opportunity(prices):
-                networks = list(prices.keys())
-                source_network = min(prices, key=prices.get)
-                destination_network = max(prices, key=prices.get)
-                amount = 1  # Placeholder for amount calculation based on available balance or trade limits
-                self.execute_arbitrage(asset, source_network, destination_network, amount)
-            time.sleep(interval)
+            prices = await self.fetch_cross_chain_prices(asset)
+            if self.detect_cross_chain_opportunity(prices):
+                buy_chain = min(prices, key=prices.get)
+                sell_chain = max(prices, key=prices.get)
+                amount = 1  # Placeholder amount
+                await self.execute_cross_chain_arbitrage(asset, buy_chain, sell_chain, amount)
+            await asyncio.sleep(interval)
 
-    def adjust_threshold(self, new_threshold: float):
+    # ---------------- Opportunity Handler for Mempool Integration Starts Here ----------------
+    def handle_cross_chain_arbitrage_opportunity(self, opportunity: dict):
         """
-        Adjusts the arbitrage threshold for triggering trades.
+        Responds to detected cross-chain arbitrage opportunities from MempoolMonitor.
 
         Args:
-        - new_threshold (float): New threshold value for arbitrage detection.
+        - opportunity (dict): Opportunity data detected by MempoolMonitor.
         """
-        self.arbitrage_threshold = new_threshold
-        self.logger.info(f"Arbitrage threshold set to {new_threshold * 100}%")
+        asset = opportunity.get("asset")
+        buy_chain = opportunity.get("buy_chain")
+        sell_chain = opportunity.get("sell_chain")
+        spread = opportunity.get("spread")
+        
+        self.logger.info(f"Cross-chain arbitrage opportunity detected for {asset} between {buy_chain} and {sell_chain} with spread {spread * 100:.2f}%")
+        
+        # Execute cross-chain arbitrage if the opportunity meets criteria
+        asyncio.create_task(self.execute_cross_chain_arbitrage(asset, buy_chain, sell_chain, amount=1))  # Example amount
+    # ---------------- Opportunity Handler Ends Here ----------------
+
+    # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
+    def handle_flash_loan_opportunity(self, opportunity: dict):
+        """
+        Responds to detected flash loan opportunities from FlashLoanMonitor.
+
+        Args:
+        - opportunity (dict): Opportunity data detected by FlashLoanMonitor.
+        """
+        asset = opportunity.get("asset")
+        amount = opportunity.get("amount")
+        
+        self.logger.info(f"Flash loan opportunity detected for {asset} with amount {amount}")
+        asyncio.create_task(self.request_flash_loan(asset, amount))  # Trigger flash loan asynchronously
+    # ---------------- Opportunity Handler for Flash Loan Integration Ends Here ----------------

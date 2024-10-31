@@ -1,73 +1,84 @@
 # moneyverse/strategies/market_maker_bot.py
 
 import logging
-from typing import Dict
+import asyncio
+from typing import Callable
 
 class MarketMakerBot:
     """
-    Places buy and sell orders around the current market price to profit from the bid-ask spread.
+    Executes market-making strategies by providing liquidity based on detected market conditions.
 
     Attributes:
-    - spread (float): Desired spread percentage between bid and ask prices.
-    - order_size (float): Amount of asset to trade per order.
-    - logger (Logger): Logs bot actions and detected opportunities.
+    - market_monitor (Callable): Function to monitor market conditions for liquidity provision.
+    - liquidity_executor (Callable): Function to provide or withdraw liquidity in response to market signals.
+    - logger (Logger): Logs market-making actions and detected opportunities.
     """
 
-    def __init__(self, spread=0.005, order_size=10):
-        self.spread = spread  # Spread percentage for bid and ask prices
-        self.order_size = order_size  # Size of each order
+    def __init__(self, market_monitor: Callable, liquidity_executor: Callable):
+        self.market_monitor = market_monitor
+        self.liquidity_executor = liquidity_executor
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"MarketMakerBot initialized with spread: {self.spread * 100}%, order size: {self.order_size}")
+        self.logger.info("MarketMakerBot initialized.")
 
-    def calculate_bid_ask_prices(self, market_price: float) -> Dict[str, float]:
+    async def monitor_market(self):
         """
-        Calculates bid and ask prices based on the market price and spread.
+        Continuously monitors market conditions for market-making opportunities.
+        """
+        self.logger.info("Monitoring market for market-making opportunities.")
+        while True:
+            opportunity = await self.market_monitor()
+            if opportunity:
+                await self.execute_market_making(opportunity)
+            await asyncio.sleep(0.5)  # Interval set for frequent monitoring
+
+    async def execute_market_making(self, opportunity: dict):
+        """
+        Executes market-making by providing or withdrawing liquidity.
 
         Args:
-        - market_price (float): Current market price of the asset.
-
-        Returns:
-        - dict: Contains calculated bid and ask prices.
+        - opportunity (dict): Data on market conditions for liquidity provision.
         """
-        bid_price = market_price * (1 - self.spread / 2)
-        ask_price = market_price * (1 + self.spread / 2)
-        self.logger.debug(f"Calculated bid price: {bid_price}, ask price: {ask_price}")
-        return {'bid_price': bid_price, 'ask_price': ask_price}
+        asset = opportunity.get("asset")
+        side = opportunity.get("side")  # "provide" or "withdraw"
+        amount = opportunity.get("amount")
+        self.logger.info(f"Executing {side} liquidity for {asset} with amount {amount}")
 
-    def place_orders(self, wallet, bid_price: float, ask_price: float):
-        """
-        Places bid and ask orders at calculated prices.
+        # Execute the liquidity action based on market conditions
+        success = await self.liquidity_executor(asset, side, amount)
+        if success:
+            self.logger.info(f"{side.capitalize()} liquidity succeeded for {asset}")
+        else:
+            self.logger.warning(f"{side.capitalize()} liquidity failed for {asset}")
 
-        Args:
-        - wallet (Wallet): Wallet instance for placing orders.
-        - bid_price (float): Calculated bid price for buying.
-        - ask_price (float): Calculated ask price for selling.
+    # ---------------- Opportunity Handler for Mempool Integration Starts Here ----------------
+    def handle_market_making_opportunity(self, opportunity: dict):
         """
-        # Simulate order placements by updating wallet balances for bid and ask
-        wallet.update_balance("bid", self.order_size * bid_price)
-        wallet.update_balance("ask", -self.order_size * ask_price)
-        self.logger.info(f"Placed bid order at {bid_price} and ask order at {ask_price}.")
-
-    def adjust_orders(self, wallet, current_market_price: float):
-        """
-        Adjusts existing orders based on new market conditions to maintain spread.
+        Responds to detected market-making opportunities from MempoolMonitor.
 
         Args:
-        - wallet (Wallet): Wallet instance for updating orders.
-        - current_market_price (float): Updated market price.
+        - opportunity (dict): Opportunity data detected by the MempoolMonitor.
         """
-        prices = self.calculate_bid_ask_prices(current_market_price)
-        self.place_orders(wallet, prices['bid_price'], prices['ask_price'])
-        self.logger.info("Adjusted orders to reflect new market conditions.")
+        asset = opportunity.get("asset")
+        side = opportunity.get("side")
+        amount = opportunity.get("amount")
 
-    def run(self, wallet, market_price: float):
+        self.logger.info(f"Market-making opportunity detected for {asset} with action {side} and amount {amount}")
+
+        # Execute market-making action asynchronously
+        asyncio.create_task(self.execute_market_making(opportunity))
+    # ---------------- Opportunity Handler Ends Here ----------------
+
+    # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
+    def handle_flash_loan_opportunity(self, opportunity: dict):
         """
-        Executes market-making by placing and adjusting orders based on market movements.
+        Responds to detected flash loan opportunities from FlashLoanMonitor.
 
         Args:
-        - wallet (Wallet): Wallet instance for order placement.
-        - market_price (float): Current market price for the asset.
+        - opportunity (dict): Opportunity data detected by FlashLoanMonitor.
         """
-        prices = self.calculate_bid_ask_prices(market_price)
-        self.place_orders(wallet, prices['bid_price'], prices['ask_price'])
-        self.logger.info("Executed market-making strategy.")
+        asset = opportunity.get("asset")
+        amount = opportunity.get("amount")
+
+        self.logger.info(f"Flash loan opportunity detected for market-making on {asset} with amount {amount}")
+        asyncio.create_task(self.request_flash_loan(asset, amount))  # Trigger flash loan asynchronously
+    # ---------------- Opportunity Handler for Flash Loan Integration Ends Here ----------------
