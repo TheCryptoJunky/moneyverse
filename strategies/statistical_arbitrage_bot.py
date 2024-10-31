@@ -6,69 +6,82 @@ from typing import Callable
 
 class StatisticalArbitrageBot:
     """
-    Executes statistical arbitrage by identifying price discrepancies between correlated assets.
+    Executes statistical arbitrage by exploiting statistical relationships between asset prices,
+    focusing on mean reversion and other statistical indicators.
 
     Attributes:
-    - price_discrepancy_monitor (Callable): Function to monitor for price discrepancies.
-    - arbitrage_executor (Callable): Function to execute arbitrage trades based on discrepancies.
-    - logger (Logger): Logs arbitrage actions and detected opportunities.
+    - stats_monitor (Callable): Function to monitor statistical relationships.
+    - trade_executor (Callable): Function to execute trades based on statistical opportunities.
+    - logger (Logger): Logs statistical arbitrage actions and detected opportunities.
     """
 
-    def __init__(self, price_discrepancy_monitor: Callable, arbitrage_executor: Callable):
-        self.price_discrepancy_monitor = price_discrepancy_monitor
-        self.arbitrage_executor = arbitrage_executor
+    def __init__(self, stats_monitor: Callable, trade_executor: Callable):
+        self.stats_monitor = stats_monitor
+        self.trade_executor = trade_executor
         self.logger = logging.getLogger(__name__)
         self.logger.info("StatisticalArbitrageBot initialized.")
 
-    async def monitor_discrepancies(self):
+    async def monitor_statistical_opportunities(self):
         """
-        Continuously monitors asset pairs for price discrepancies based on statistical correlations.
+        Continuously monitors for statistical arbitrage opportunities based on price deviations.
         """
-        self.logger.info("Monitoring for statistical arbitrage opportunities.")
+        self.logger.info("Monitoring statistical relationships for arbitrage opportunities.")
         while True:
-            discrepancy = await self.price_discrepancy_monitor()
-            if discrepancy:
-                await self.execute_arbitrage(discrepancy)
-            await asyncio.sleep(0.5)  # Interval for frequent checks
+            stats_opportunity = await self.stats_monitor()
+            if stats_opportunity:
+                await self.execute_statistical_trade(stats_opportunity)
+            await asyncio.sleep(0.5)  # Adjust frequency as needed for effective monitoring
 
-    async def execute_arbitrage(self, discrepancy: dict):
+    async def execute_statistical_trade(self, stats_opportunity: dict):
         """
-        Executes an arbitrage trade based on detected price discrepancies.
+        Executes a trade based on a detected statistical price deviation.
 
         Args:
-        - discrepancy (dict): Data on the detected price discrepancy.
+        - stats_opportunity (dict): Data on the price deviation and expected reversion.
         """
-        asset_pair = discrepancy.get("asset_pair")
-        buy_side = discrepancy.get("buy_side")  # "buy" or "sell"
-        amount = discrepancy.get("amount")
-        self.logger.info(f"Executing statistical arbitrage for {asset_pair} with {buy_side} side and amount {amount}")
+        asset_pair = stats_opportunity.get("asset_pair")
+        amount = stats_opportunity.get("amount")
+        self.logger.info(f"Executing statistical arbitrage trade for assets {asset_pair} with amount {amount}")
 
-        # Execute the arbitrage trade
-        success = await self.arbitrage_executor(asset_pair, buy_side, amount)
+        # Execute trade based on mean reversion or other statistical signals
+        success = await self.trade_executor(asset_pair, amount)
         if success:
-            self.logger.info(f"Statistical arbitrage trade succeeded for {asset_pair}")
+            self.logger.info("Statistical arbitrage trade succeeded")
         else:
-            self.logger.warning(f"Statistical arbitrage trade failed for {asset_pair}")
+            self.logger.warning("Statistical arbitrage trade failed")
 
     # ---------------- Opportunity Handler for Mempool Integration Starts Here ----------------
-    def handle_statistical_arbitrage_opportunity(self, discrepancy: dict):
+    def handle_statistical_arbitrage_opportunity(self, stats_opportunity: dict):
         """
         Responds to detected statistical arbitrage opportunities from MempoolMonitor.
 
         Args:
-        - discrepancy (dict): Opportunity data detected by the MempoolMonitor.
+        - stats_opportunity (dict): Opportunity data detected by the MempoolMonitor.
         """
-        asset_pair = discrepancy.get("asset_pair")
-        buy_side = discrepancy.get("buy_side")
-        amount = discrepancy.get("amount")
+        asset_pair = stats_opportunity.get("asset_pair")
+        amount = stats_opportunity.get("amount")
 
-        self.logger.info(f"Statistical arbitrage opportunity detected for {asset_pair} with {buy_side} side and amount {amount}")
+        self.logger.info(f"Statistical arbitrage opportunity detected for assets {asset_pair} with amount {amount}")
 
-        # Execute arbitrage trade asynchronously
-        asyncio.create_task(self.execute_arbitrage(discrepancy))
+        # Execute statistical arbitrage asynchronously
+        asyncio.create_task(self.execute_statistical_trade(stats_opportunity))
     # ---------------- Opportunity Handler Ends Here ----------------
 
     # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
+    async def request_and_execute_flash_loan(self, amount: float, stats_opportunity: dict):
+        """
+        Requests a flash loan and executes a statistical arbitrage trade if the loan is granted.
+
+        Args:
+        - amount (float): The amount required for the trade.
+        - stats_opportunity (dict): The trade opportunity to execute with the loan.
+        """
+        asset_pair = stats_opportunity.get("asset_pair")
+        self.logger.info(f"Requesting flash loan of {amount} for statistical arbitrage on {asset_pair}")
+
+        # Assume flash loan approval; execute statistical trade with flash loan amount
+        await self.execute_statistical_trade(stats_opportunity)
+
     def handle_flash_loan_opportunity(self, opportunity: dict):
         """
         Responds to detected flash loan opportunities from FlashLoanMonitor.
@@ -76,9 +89,11 @@ class StatisticalArbitrageBot:
         Args:
         - opportunity (dict): Opportunity data detected by FlashLoanMonitor.
         """
-        asset = opportunity.get("asset")
+        asset_pair = opportunity.get("asset_pair")
         amount = opportunity.get("amount")
+        stats_opportunity = opportunity.get("stats_opportunity", {})
 
-        self.logger.info(f"Flash loan opportunity detected for statistical arbitrage on {asset} with amount {amount}")
-        asyncio.create_task(self.request_flash_loan(asset, amount))  # Trigger flash loan asynchronously
+        if stats_opportunity:
+            self.logger.info(f"Flash loan opportunity detected for statistical arbitrage on {asset_pair} with amount {amount}")
+            asyncio.create_task(self.request_and_execute_flash_loan(amount, stats_opportunity))
     # ---------------- Opportunity Handler for Flash Loan Integration Ends Here ----------------

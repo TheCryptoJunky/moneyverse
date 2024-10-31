@@ -6,12 +6,11 @@ from typing import Callable
 
 class SpatialArbitrageBot:
     """
-    Executes spatial arbitrage by identifying price discrepancies for the same asset
-    across different regional exchanges and capturing the price difference.
+    Executes spatial arbitrage by capitalizing on price differences of the same asset across different exchanges.
 
     Attributes:
-    - spatial_monitor (Callable): Function to monitor price discrepancies across exchanges.
-    - trade_executor (Callable): Function to execute buy and sell trades across regions.
+    - spatial_monitor (Callable): Function to monitor asset prices across exchanges.
+    - trade_executor (Callable): Function to execute trades based on spatial arbitrage opportunities.
     - logger (Logger): Logs spatial arbitrage actions and detected opportunities.
     """
 
@@ -23,30 +22,32 @@ class SpatialArbitrageBot:
 
     async def monitor_spatial_opportunities(self):
         """
-        Continuously monitors regional exchanges for price discrepancies to exploit.
+        Continuously monitors for price discrepancies across exchanges to detect spatial arbitrage opportunities.
         """
-        self.logger.info("Monitoring regional exchanges for spatial arbitrage opportunities.")
+        self.logger.info("Monitoring exchanges for spatial arbitrage opportunities.")
         while True:
             spatial_opportunity = await self.spatial_monitor()
             if spatial_opportunity:
                 await self.execute_spatial_trade(spatial_opportunity)
-            await asyncio.sleep(1)  # Monitor frequently for regional price changes
+            await asyncio.sleep(0.5)  # Adjust frequency based on market conditions
 
     async def execute_spatial_trade(self, spatial_opportunity: dict):
         """
-        Executes spatial arbitrage based on a detected price discrepancy between regions.
+        Executes a trade based on a detected price discrepancy across exchanges.
 
         Args:
-        - spatial_opportunity (dict): Data on the price discrepancy across regions.
+        - spatial_opportunity (dict): Data on the price difference for an asset across exchanges.
         """
         asset = spatial_opportunity.get("asset")
-        low_price_exchange = spatial_opportunity.get("low_price_exchange")
-        high_price_exchange = spatial_opportunity.get("high_price_exchange")
+        buy_exchange = spatial_opportunity.get("buy_exchange")
+        sell_exchange = spatial_opportunity.get("sell_exchange")
         amount = spatial_opportunity.get("amount")
-        self.logger.info(f"Executing spatial arbitrage for {asset} with amount {amount} between {low_price_exchange} and {high_price_exchange}")
+        buy_price = spatial_opportunity.get("buy_price")
+        sell_price = spatial_opportunity.get("sell_price")
+        self.logger.info(f"Executing spatial arbitrage for {asset} between {buy_exchange} (buy) and {sell_exchange} (sell)")
 
-        # Execute the spatial arbitrage trade
-        success = await self.trade_executor(asset, low_price_exchange, high_price_exchange, amount)
+        # Execute the trade across exchanges
+        success = await self.trade_executor(asset, buy_exchange, sell_exchange, amount, buy_price, sell_price)
         if success:
             self.logger.info(f"Spatial arbitrage trade succeeded for {asset}")
         else:
@@ -61,17 +62,31 @@ class SpatialArbitrageBot:
         - spatial_opportunity (dict): Opportunity data detected by the MempoolMonitor.
         """
         asset = spatial_opportunity.get("asset")
-        low_price_exchange = spatial_opportunity.get("low_price_exchange")
-        high_price_exchange = spatial_opportunity.get("high_price_exchange")
+        buy_exchange = spatial_opportunity.get("buy_exchange")
+        sell_exchange = spatial_opportunity.get("sell_exchange")
         amount = spatial_opportunity.get("amount")
 
-        self.logger.info(f"Spatial arbitrage opportunity detected for {asset} with amount {amount} between {low_price_exchange} and {high_price_exchange}")
+        self.logger.info(f"Spatial arbitrage opportunity detected for {asset} between {buy_exchange} and {sell_exchange} with amount {amount}")
 
         # Execute spatial arbitrage asynchronously
         asyncio.create_task(self.execute_spatial_trade(spatial_opportunity))
     # ---------------- Opportunity Handler Ends Here ----------------
 
     # ---------------- Opportunity Handler for Flash Loan Integration Starts Here ----------------
+    async def request_and_execute_flash_loan(self, amount: float, spatial_opportunity: dict):
+        """
+        Requests a flash loan and executes spatial arbitrage if the loan is granted.
+
+        Args:
+        - amount (float): The amount required for the trade.
+        - spatial_opportunity (dict): The trade opportunity to execute with the loan.
+        """
+        asset = spatial_opportunity.get("asset")
+        self.logger.info(f"Requesting flash loan of {amount} for spatial arbitrage on {asset}")
+
+        # Assume flash loan approval; execute spatial trade with flash loan amount
+        await self.execute_spatial_trade(spatial_opportunity)
+
     def handle_flash_loan_opportunity(self, opportunity: dict):
         """
         Responds to detected flash loan opportunities from FlashLoanMonitor.
@@ -81,29 +96,9 @@ class SpatialArbitrageBot:
         """
         asset = opportunity.get("asset")
         amount = opportunity.get("amount")
-        low_price_exchange = opportunity.get("low_price_exchange")
-        high_price_exchange = opportunity.get("high_price_exchange")
+        spatial_opportunity = opportunity.get("spatial_opportunity", {})
 
-        self.logger.info(f"Flash loan opportunity detected for spatial arbitrage on {asset} with amount {amount}")
-        asyncio.create_task(self.request_flash_loan_and_execute_trade(asset, amount, low_price_exchange, high_price_exchange))
+        if spatial_opportunity:
+            self.logger.info(f"Flash loan opportunity detected for spatial arbitrage on {asset} with amount {amount}")
+            asyncio.create_task(self.request_and_execute_flash_loan(amount, spatial_opportunity))
     # ---------------- Opportunity Handler for Flash Loan Integration Ends Here ----------------
-
-    async def request_flash_loan_and_execute_trade(self, asset: str, amount: float, low_price_exchange: str, high_price_exchange: str):
-        """
-        Requests a flash loan and executes a spatial arbitrage trade if the loan is granted.
-
-        Args:
-        - asset (str): The asset to trade.
-        - amount (float): The amount to trade with the flash loan.
-        - low_price_exchange (str): Exchange where the asset is bought.
-        - high_price_exchange (str): Exchange where the asset is sold.
-        """
-        self.logger.info(f"Requesting flash loan of {amount} for spatial arbitrage on {asset}")
-        
-        # Assume flash loan approval; execute trade across exchanges
-        await self.execute_spatial_trade({
-            "asset": asset,
-            "low_price_exchange": low_price_exchange,
-            "high_price_exchange": high_price_exchange,
-            "amount": amount,
-        })
