@@ -1,67 +1,103 @@
-# Full file path: /moneyverse/managers/bot_manager.py
+# moneyverse/managers/bot_manager.py
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import asyncio
-from centralized_logger import CentralizedLogger
+import logging
+from typing import Dict, Any
+from moneyverse.helper_bots import HelperBot  # Import base class or interfaces as needed
 
-# Pydantic model for bot control requests
-class BotAction(BaseModel):
-    bot_id: str
+class BotManager:
+    """
+    Manages lifecycle and performance monitoring for each bot in the system.
 
-# Initialize FastAPI app and centralized logger
-app = FastAPI()
-logger = CentralizedLogger()
+    Attributes:
+    - active_bots (dict): Dictionary storing active bot instances with their statuses.
+    - logger (Logger): Logs lifecycle events and performance of bots.
+    """
 
-# Sample bot status dictionary (replace with actual bot instances and logic)
-bots = {
-    "bot1": {"status": "stopped", "strategy": "Arbitrage", "performance": {}},
-    "bot2": {"status": "stopped", "strategy": "Sniper", "performance": {}},
-}
+    def __init__(self):
+        self.active_bots = {}  # Stores bot instances with lifecycle statuses
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("BotManager initialized with empty bot list.")
 
-@app.post("/start_bot")
-async def start_bot(action: BotAction):
-    """Starts the specified bot."""
-    bot_id = action.bot_id
-    if bot_id not in bots:
-        raise HTTPException(status_code=404, detail="Bot not found")
+    def register_bot(self, bot_name: str, bot_instance: HelperBot):
+        """
+        Registers a new bot to the manager.
 
-    if bots[bot_id]["status"] == "running":
-        raise HTTPException(status_code=400, detail="Bot is already running")
+        Args:
+        - bot_name (str): Name of the bot to register.
+        - bot_instance (HelperBot): Instance of the bot to manage.
+        """
+        self.active_bots[bot_name] = {
+            "instance": bot_instance,
+            "status": "stopped"
+        }
+        self.logger.info(f"Registered bot {bot_name}.")
 
-    # Simulate async bot start with real bot logic
-    bots[bot_id]["status"] = "running"
-    logger.log("info", f"Starting bot {bot_id} with strategy {bots[bot_id]['strategy']}")
-    await asyncio.sleep(1)  # Placeholder for actual async start logic
-    return {"status": f"{bot_id} started"}
+    def start_bot(self, bot_name: str):
+        """
+        Starts a registered bot and updates its status.
 
-@app.post("/stop_bot")
-async def stop_bot(action: BotAction):
-    """Stops the specified bot."""
-    bot_id = action.bot_id
-    if bot_id not in bots:
-        raise HTTPException(status_code=404, detail="Bot not found")
+        Args:
+        - bot_name (str): Name of the bot to start.
+        """
+        if bot_name in self.active_bots and self.active_bots[bot_name]["status"] != "running":
+            bot_instance = self.active_bots[bot_name]["instance"]
+            bot_instance.start()
+            self.active_bots[bot_name]["status"] = "running"
+            self.logger.info(f"Started bot {bot_name}.")
+        else:
+            self.logger.warning(f"Bot {bot_name} already running or not registered.")
 
-    if bots[bot_id]["status"] == "stopped":
-        raise HTTPException(status_code=400, detail="Bot is already stopped")
+    def stop_bot(self, bot_name: str):
+        """
+        Stops a running bot and updates its status.
 
-    # Simulate async bot stop with real bot logic
-    bots[bot_id]["status"] = "stopped"
-    logger.log("info", f"Stopping bot {bot_id}")
-    await asyncio.sleep(1)  # Placeholder for actual async stop logic
-    return {"status": f"{bot_id} stopped"}
+        Args:
+        - bot_name (str): Name of the bot to stop.
+        """
+        if bot_name in self.active_bots and self.active_bots[bot_name]["status"] == "running":
+            bot_instance = self.active_bots[bot_name]["instance"]
+            bot_instance.stop()
+            self.active_bots[bot_name]["status"] = "stopped"
+            self.logger.info(f"Stopped bot {bot_name}.")
+        else:
+            self.logger.warning(f"Bot {bot_name} is not running or not registered.")
 
-@app.get("/status")
-async def get_status(bot_id: str):
-    """Get the current status of a bot."""
-    if bot_id not in bots:
-        raise HTTPException(status_code=404, detail="Bot not found")
-    bot_status = bots[bot_id]
-    logger.log("info", f"Checked status for bot {bot_id}: {bot_status['status']}")
-    return {"bot_id": bot_id, "status": bot_status["status"], "strategy": bot_status["strategy"], "performance": bot_status["performance"]}
+    def monitor_bot_performance(self, bot_name: str) -> Dict[str, Any]:
+        """
+        Monitors and logs the performance metrics of a running bot.
 
-@app.get("/all_statuses")
-async def get_all_statuses():
-    """Get the status of all bots."""
-    logger.log("info", "Retrieved status of all bots")
-    return [{"bot_id": bot_id, "status": info["status"], "strategy": info["strategy"]} for bot_id, info in bots.items()]
+        Args:
+        - bot_name (str): Name of the bot to monitor.
+
+        Returns:
+        - dict: Performance metrics of the bot.
+        """
+        if bot_name in self.active_bots and self.active_bots[bot_name]["status"] == "running":
+            bot_instance = self.active_bots[bot_name]["instance"]
+            metrics = bot_instance.get_performance_metrics()
+            self.logger.info(f"Performance metrics for {bot_name}: {metrics}")
+            return metrics
+        else:
+            self.logger.warning(f"Bot {bot_name} is not running or not registered.")
+            return {}
+
+    def restart_bot(self, bot_name: str):
+        """
+        Restarts a bot by stopping and starting it again.
+
+        Args:
+        - bot_name (str): Name of the bot to restart.
+        """
+        self.stop_bot(bot_name)
+        self.start_bot(bot_name)
+        self.logger.info(f"Restarted bot {bot_name}.")
+
+    def list_active_bots(self) -> Dict[str, str]:
+        """
+        Lists all registered bots with their current statuses.
+
+        Returns:
+        - dict: Dictionary of bot names and their statuses.
+        """
+        self.logger.info("Listing all active bots and their statuses.")
+        return {bot_name: info["status"] for bot_name, info in self.active_bots.items()}

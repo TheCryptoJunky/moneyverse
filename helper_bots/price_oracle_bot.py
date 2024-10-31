@@ -1,90 +1,109 @@
-from ai.lstm_model import LSTMModel
-from ai.arima_model import ARIMAModel
-from centralized_logger import CentralizedLogger
-from market_data import MarketDataAPI
-from src.safety.safety_manager import SafetyManager
-from src.services.aggregator_service import AggregatorService
+# moneyverse/helper_bots/price_oracle_bot.py
 
-logger = CentralizedLogger()
-lstm_model = LSTMModel()
-arima_model = ARIMAModel()
-safety_manager = SafetyManager()
-aggregator_service = AggregatorService()
+import logging
+from typing import Dict, List
 
 class PriceOracleBot:
     """
-    Price Oracle Bot that fetches price data, predicts future prices, and executes arbitrage trades.
-    This enhanced version integrates autonomous decision-making and real-time adjustments.
+    Aggregates real-time price data across multiple exchanges or oracles, ensuring consistent and validated pricing.
+
+    Attributes:
+    - price_sources (dict): Dictionary of sources with functions to fetch price data.
+    - price_data (dict): Latest price data aggregated from sources.
+    - consistency_threshold (float): Allowable percentage difference between sources.
+    - logger (Logger): Logs pricing updates and any detected inconsistencies.
     """
 
-    def __init__(self):
-        self.market_data = MarketDataAPI()
-        self.arbitrage_threshold = 0.02  # Arbitrage threshold in percentage for executing trades
+    def __init__(self, price_sources: Dict[str, callable], consistency_threshold=0.02):
+        self.price_sources = price_sources  # {source_name: function to fetch price}
+        self.consistency_threshold = consistency_threshold
+        self.price_data = {}  # {asset: {source: price}}
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("PriceOracleBot initialized with consistency threshold of {:.2%}".format(consistency_threshold))
 
-    def fetch_and_predict_prices(self):
+    def fetch_prices(self, asset: str) -> Dict[str, float]:
         """
-        Fetch prices from exchanges and predict future prices using ensemble AI models.
+        Fetches price data from all sources for a specific asset.
+
+        Args:
+        - asset (str): Asset symbol to fetch price for.
+
+        Returns:
+        - dict: Dictionary of prices from each source.
         """
-        logger.log("info", "Fetching prices from exchanges...")
+        prices = {}
+        for source, fetch_func in self.price_sources.items():
+            try:
+                price = fetch_func(asset)
+                prices[source] = price
+                self.logger.debug(f"Fetched price for {asset} from {source}: {price}")
+            except Exception as e:
+                self.logger.error(f"Failed to fetch price from {source} for {asset}: {str(e)}")
+        return prices
 
-        try:
-            # Fetch real-time prices
-            prices = self.market_data.get_prices()
-            logger.log("info", f"Fetched prices: {prices}")
-
-            # Ensemble prediction using LSTM and ARIMA models
-            lstm_prediction = lstm_model.predict(prices)
-            arima_prediction = arima_model.predict(prices)
-            combined_prediction = (0.7 * lstm_prediction) + (0.3 * arima_prediction)
-            logger.log("info", f"Combined Prediction: {combined_prediction}")
-
-            # Safety check and arbitrage execution
-            if safety_manager.check_safety(prices):
-                self.execute_arbitrage(prices, combined_prediction)
-            else:
-                logger.log("warning", "Safety conditions not met. Skipping arbitrage.")
-
-        except Exception as e:
-            logger.log("error", f"Error in price prediction: {str(e)}")
-
-    def execute_arbitrage(self, current_prices, predicted_prices):
+    def validate_price_consistency(self, prices: Dict[str, float]) -> bool:
         """
-        Execute arbitrage trades based on price predictions using a cost-effective aggregator.
+        Validates that prices from different sources are within the consistency threshold.
+
+        Args:
+        - prices (dict): Dictionary of price data from various sources.
+
+        Returns:
+        - bool: True if prices are consistent, False if discrepancies exceed the threshold.
         """
-        price_differential = self.calculate_price_differential(current_prices, predicted_prices)
-        if price_differential >= self.arbitrage_threshold:
-            logger.log("info", f"Detected arbitrage opportunity with differential: {price_differential}")
-            aggregator = self.select_cost_effective_aggregator(current_prices, predicted_prices)
-            if aggregator:
-                # Execute trade through selected aggregator
-                success = aggregator_service.execute_trade(
-                    aggregator=aggregator,
-                    amount=price_differential,
-                    asset="selected_asset"  # Placeholder for the chosen asset
-                )
-                if success:
-                    logger.log("info", f"Arbitrage executed via {aggregator.name}")
-                else:
-                    logger.log("error", f"Arbitrage execution failed with {aggregator.name}")
+        if len(prices) < 2:
+            return True  # No comparison needed if only one source
+
+        avg_price = sum(prices.values()) / len(prices)
+        for source, price in prices.items():
+            if abs(price - avg_price) / avg_price > self.consistency_threshold:
+                self.logger.warning(f"Price inconsistency detected for {source}: {price} deviates from avg {avg_price}")
+                return False
+        return True
+
+    def update_price_data(self, asset: str):
+        """
+        Updates the aggregated price data for an asset and checks for consistency.
+
+        Args:
+        - asset (str): Asset symbol to update price data for.
+        """
+        prices = self.fetch_prices(asset)
+        if self.validate_price_consistency(prices):
+            self.price_data[asset] = prices
+            avg_price = sum(prices.values()) / len(prices)
+            self.logger.info(f"Updated consistent price for {asset}: {avg_price}")
         else:
-            logger.log("info", "No viable arbitrage opportunity detected.")
+            self.logger.warning(f"Inconsistent price data for {asset}: {prices}")
 
-    def calculate_price_differential(self, current_prices, predicted_prices):
+    def get_average_price(self, asset: str) -> float:
         """
-        Calculate price differential between current and predicted prices.
-        Returns a percentage indicating the arbitrage opportunity.
-        """
-        return abs((predicted_prices - current_prices) / current_prices)
+        Returns the average price of an asset based on the latest data.
 
-    def select_cost_effective_aggregator(self, current_prices, predicted_prices):
-        """
-        Choose the lowest-cost aggregator for arbitrage based on current and predicted prices.
-        """
-        aggregators = aggregator_service.get_available_aggregators()
-        best_aggregator = min(aggregators, key=lambda agg: agg.get_trade_cost("selected_asset"))
-        logger.log("info", f"Selected aggregator: {best_aggregator.name} for cost-effective arbitrage.")
-        return best_aggregator
+        Args:
+        - asset (str): Asset symbol to retrieve average price for.
 
-if __name__ == "__main__":
-    bot = PriceOracleBot()
-    bot.fetch_and_predict_prices()
+        Returns:
+        - float: Average price across sources, or 0 if no data available.
+        """
+        if asset in self.price_data:
+            avg_price = sum(self.price_data[asset].values()) / len(self.price_data[asset])
+            self.logger.debug(f"Average price for {asset}: {avg_price}")
+            return avg_price
+        self.logger.warning(f"No price data available for {asset}.")
+        return 0.0
+
+    def check_price_alert(self, asset: str, alert_threshold: float):
+        """
+        Checks if price discrepancies exceed the alert threshold and logs an alert if so.
+
+        Args:
+        - asset (str): Asset symbol to check.
+        - alert_threshold (float): Percentage threshold to trigger an alert.
+        """
+        if asset in self.price_data:
+            prices = self.price_data[asset]
+            avg_price = self.get_average_price(asset)
+            for source, price in prices.items():
+                if abs(price - avg_price) / avg_price > alert_threshold:
+                    self.logger.warning(f"Price alert for {asset} on {source}: {price} deviates by >{alert_threshold:.2%}")
