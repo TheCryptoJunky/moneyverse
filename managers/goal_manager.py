@@ -5,98 +5,98 @@ from typing import Dict
 
 class GoalManager:
     """
-    Manages adaptive trading goals such as profit targets, risk limits, and trade frequency.
+    Manages performance goals for individual strategies and the overall portfolio.
 
     Attributes:
-    - profit_target (float): Desired profit target as a percentage.
-    - risk_limit (float): Maximum acceptable risk per trade as a percentage.
-    - trade_frequency (int): Desired frequency of trades within a given period.
-    - logger (Logger): Logs goal setting and updates.
+    - strategy_goals (dict): Stores performance targets for individual strategies.
+    - portfolio_goal (float): Net Asset Value (NAV) growth target for the entire portfolio.
+    - logger (Logger): Logs goal updates, progress tracking, and adjustments.
     """
 
-    def __init__(self, profit_target=0.05, risk_limit=0.02, trade_frequency=10):
-        self.profit_target = profit_target  # 5% profit target
-        self.risk_limit = risk_limit  # 2% risk per trade limit
-        self.trade_frequency = trade_frequency  # Default trade frequency
+    def __init__(self, initial_portfolio_goal=0.05):
+        self.strategy_goals = {}  # {strategy_name: goal}
+        self.portfolio_goal = initial_portfolio_goal  # e.g., 5% growth target
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"GoalManager initialized with profit target: {self.profit_target * 100}%, "
-                         f"risk limit: {self.risk_limit * 100}%, trade frequency: {self.trade_frequency}")
+        self.logger.info(f"GoalManager initialized with portfolio goal: {self.portfolio_goal * 100}%")
 
-    def update_goal(self, goal_name: str, value: float):
+    def set_strategy_goal(self, strategy_name: str, goal: float):
         """
-        Updates a specified trading goal.
+        Sets a performance target for an individual strategy.
 
         Args:
-        - goal_name (str): Name of the goal to update ("profit_target", "risk_limit", or "trade_frequency").
-        - value (float): New value for the specified goal.
+        - strategy_name (str): Name of the strategy.
+        - goal (float): Target performance as a percentage (e.g., 0.1 for 10% growth).
         """
-        if goal_name == "profit_target":
-            self.profit_target = value
-            self.logger.info(f"Updated profit target to {self.profit_target * 100}%")
-        elif goal_name == "risk_limit":
-            self.risk_limit = value
-            self.logger.info(f"Updated risk limit to {self.risk_limit * 100}%")
-        elif goal_name == "trade_frequency":
-            self.trade_frequency = int(value)
-            self.logger.info(f"Updated trade frequency to {self.trade_frequency}")
+        self.strategy_goals[strategy_name] = goal
+        self.logger.info(f"Set goal for {strategy_name}: {goal * 100}%")
+
+    def update_portfolio_goal(self, new_goal: float):
+        """
+        Updates the growth target for the portfolio.
+
+        Args:
+        - new_goal (float): New target growth percentage (e.g., 0.07 for 7%).
+        """
+        self.portfolio_goal = new_goal
+        self.logger.info(f"Updated portfolio goal to {new_goal * 100}%")
+
+    def check_strategy_progress(self, strategy_name: str, performance: float) -> bool:
+        """
+        Checks if a strategy has met its performance target.
+
+        Args:
+        - strategy_name (str): Name of the strategy.
+        - performance (float): Current performance percentage.
+
+        Returns:
+        - bool: True if the goal is met, False otherwise.
+        """
+        target = self.strategy_goals.get(strategy_name, None)
+        if target is not None:
+            if performance >= target:
+                self.logger.info(f"{strategy_name} met its goal with performance of {performance * 100}%")
+                return True
+            else:
+                self.logger.debug(f"{strategy_name} progress: {performance * 100}% of target {target * 100}%")
+        return False
+
+    def check_portfolio_progress(self, current_nav: float, initial_nav: float) -> bool:
+        """
+        Checks if the portfolio has met its growth target based on NAV.
+
+        Args:
+        - current_nav (float): Current NAV of the portfolio.
+        - initial_nav (float): Initial NAV at the start of the goal period.
+
+        Returns:
+        - bool: True if the goal is met, False otherwise.
+        """
+        growth = (current_nav - initial_nav) / initial_nav
+        if growth >= self.portfolio_goal:
+            self.logger.info(f"Portfolio goal met with growth of {growth * 100}%")
+            return True
         else:
-            self.logger.warning(f"Goal '{goal_name}' not recognized. No update performed.")
-
-    def evaluate_performance(self, current_profit: float) -> bool:
-        """
-        Evaluates current profit against the profit target to determine if adjustments are needed.
-
-        Args:
-        - current_profit (float): Current profit as a percentage.
-
-        Returns:
-        - bool: True if profit target is met or exceeded, False otherwise.
-        """
-        if current_profit >= self.profit_target:
-            self.logger.info(f"Profit target of {self.profit_target * 100}% met. Current profit: {current_profit * 100}%.")
-            return True
-        self.logger.debug("Profit target not yet met.")
+            self.logger.debug(f"Portfolio growth: {growth * 100}% of target {self.portfolio_goal * 100}%")
         return False
 
-    def risk_exceeded(self, current_risk: float) -> bool:
+    def adjust_goals_based_on_market(self, market_volatility: float):
         """
-        Checks if the current risk exceeds the defined risk limit.
+        Adjusts goals based on market conditions, lowering targets in volatile conditions.
 
         Args:
-        - current_risk (float): Current risk level as a percentage.
-
-        Returns:
-        - bool: True if risk limit is exceeded, False otherwise.
+        - market_volatility (float): Current volatility measure (e.g., VIX index or custom volatility metric).
         """
-        if current_risk > self.risk_limit:
-            self.logger.warning(f"Risk limit exceeded. Current risk: {current_risk * 100}%, limit: {self.risk_limit * 100}%.")
-            return True
-        self.logger.debug("Risk limit within acceptable bounds.")
-        return False
+        if market_volatility > 0.5:  # High volatility threshold
+            self.portfolio_goal *= 0.9  # Lower goals by 10% in high volatility
+            self.strategy_goals = {strategy: goal * 0.9 for strategy, goal in self.strategy_goals.items()}
+            self.logger.info("Goals adjusted for high market volatility.")
+        else:
+            self.logger.info("No adjustment needed for stable market conditions.")
 
-    def adjust_trade_frequency(self, market_condition: str):
+    def reset_strategy_goals(self):
         """
-        Adjusts trade frequency based on market conditions.
-
-        Args:
-        - market_condition (str): Describes current market condition (e.g., "volatile", "stable").
+        Resets all strategy goals to the initial baseline, allowing fresh tracking.
         """
-        if market_condition == "volatile":
-            self.trade_frequency = max(1, int(self.trade_frequency * 0.5))  # Reduce frequency
-            self.logger.info(f"Market is volatile. Reducing trade frequency to {self.trade_frequency}.")
-        elif market_condition == "stable":
-            self.trade_frequency = int(self.trade_frequency * 1.2)  # Increase frequency
-            self.logger.info(f"Market is stable. Increasing trade frequency to {self.trade_frequency}.")
-
-    def get_goals(self) -> Dict[str, float]:
-        """
-        Retrieves the current set of goals.
-
-        Returns:
-        - dict: Dictionary containing current goals.
-        """
-        return {
-            "profit_target": self.profit_target,
-            "risk_limit": self.risk_limit,
-            "trade_frequency": self.trade_frequency
-        }
+        for strategy in self.strategy_goals:
+            self.strategy_goals[strategy] = self.strategy_goals.get(strategy, self.portfolio_goal)
+        self.logger.info("Reset all strategy goals to baseline targets.")
