@@ -1,99 +1,85 @@
 import asyncio
 import logging
-from typing import List, Dict, Optional
+from typing import List
 from .wallet import Wallet
 from ..strategies.mev_strategy import MEVStrategy
-from ..managers.wallet_manager import WalletManager
-from ..managers.strategy_manager import StrategyManager
-from ..database.db_connection import DatabaseConnection
-from ..algorithms.reinforcement_agent import ReinforcementAgent
 
 class WalletSwarm:
     """
-    AI-enhanced swarm of wallets for autonomous, parallel MEV-based strategies.
+    Manages a swarm of wallets for obfuscation, resource distribution, and coordinated execution.
 
     Attributes:
     - wallets (List[Wallet]): List of wallets in the swarm.
-    - strategy_manager (StrategyManager): Manages and coordinates strategies.
-    - wallet_manager (WalletManager): Manages wallet assignments and tasks.
-    - reinforcement_agent (ReinforcementAgent): Core RL agent for strategy adjustments.
+    - mev_strategy (MEVStrategy): Strategy for maximized profit across wallets.
+    - target_nav_growth (float): Targeted net asset value (NAV) growth rate.
     """
 
-    def __init__(self, db: DatabaseConnection, wallet_addresses: Optional[List[str]] = None):
-        """
-        Initialize a new WalletSwarm instance with a central database connection.
-
-        Args:
-        - db (DatabaseConnection): Database instance for logging and tracking.
-        - wallet_addresses (Optional[List[str]]): List of wallet addresses.
-        """
+    def __init__(self, mev_strategy=None, wallet_addresses=None, target_nav_growth=2.0):
         self.wallets = []
-        self.db = db
-        self.strategy_manager = StrategyManager(db)
-        self.wallet_manager = WalletManager(db)
-        self.reinforcement_agent = ReinforcementAgent()
+        self.mev_strategy = mev_strategy
+        self.wallet_addresses = wallet_addresses or []
+        self.target_nav_growth = target_nav_growth  # Goal to double NAV
         self.logger = logging.getLogger(__name__)
-
-        for address in wallet_addresses or []:
+        
+        for address in self.wallet_addresses:
             self.add_wallet(address)
 
-    def add_wallet(self, address: str, initial_balance: float = 0.0):
+    def add_wallet(self, address, initial_balance=0.0):
         """
-        Add a new wallet to the swarm with an initial balance.
+        Adds a wallet to the swarm.
         """
-        wallet = Wallet(address=address, initial_balance=initial_balance)
+        wallet = Wallet(address=address, balance=initial_balance)
         self.wallets.append(wallet)
-        self.wallet_manager.register_wallet(wallet)
-        self.logger.info(f"Added wallet {address} with initial balance {initial_balance}.")
+        self.logger.info(f"Added wallet {address} with balance {initial_balance}.")
 
-    async def balance_assets(self):
+    def remove_wallet(self, address):
         """
-        Balance assets dynamically across wallets to meet trading needs and maximize NAV growth.
+        Removes a wallet by its address.
         """
-        total_value = sum(wallet.get_balance() for wallet in self.wallets)
-        target_value = total_value / len(self.wallets)
+        self.wallets = [w for w in self.wallets if w.address != address]
+        self.logger.info(f"Removed wallet {address} from the swarm.")
+
+    def redistribute_assets(self):
+        """
+        Distributes assets among wallets to rebalance the swarm and meet target NAV.
+        """
+        total_balance = sum(wallet.balance for wallet in self.wallets)
         for wallet in self.wallets:
-            balance_diff = target_value - wallet.get_balance()
-            if abs(balance_diff) > 0.01:
-                self.wallet_manager.redistribute_assets(wallet, balance_diff)
-                self.logger.info(f"Balanced wallet {wallet.address} by {balance_diff}.")
+            wallet.balance = total_balance / len(self.wallets)
+        self.logger.info(f"Redistributed assets. Each wallet balance updated to {total_balance / len(self.wallets)}.")
 
-    async def execute_strategies(self):
+    async def execute_mev_strategy(self):
         """
-        Executes all strategies in parallel based on real-time data and RL-based prioritization.
+        Executes the MEV strategy across all wallets asynchronously.
         """
-        tasks = []
-        prioritized_strategies = self.reinforcement_agent.prioritize_strategies(
-            self.strategy_manager.get_all_strategy_names()
-        )
-        for strategy_name in prioritized_strategies:
-            for wallet in self.wallets:
-                strategy_instance = self.strategy_manager.get_strategy(strategy_name)
-                tasks.append(asyncio.create_task(strategy_instance.execute(wallet)))
+        tasks = [self.mev_strategy.execute(wallet) for wallet in self.wallets]
         await asyncio.gather(*tasks)
-        self.logger.info("Executed prioritized strategies across the swarm.")
+        self.logger.info("MEV strategy executed for all wallets in swarm.")
 
     def calculate_total_nav(self) -> float:
         """
-        Calculates and logs the total NAV for the wallet swarm.
+        Calculates the total NAV of the wallet swarm.
         """
-        total_nav = sum(wallet.calculate_net_value() for wallet in self.wallets)
-        self.logger.info(f"Total Swarm NAV: {total_nav}")
+        total_nav = sum(wallet.balance for wallet in self.wallets)
+        self.logger.info(f"Total NAV of swarm calculated: {total_nav}")
         return total_nav
+
+    def rebalance_swarm(self):
+        """
+        Rebalances the swarm based on performance and target NAV growth rate.
+        """
+        total_nav = self.calculate_total_nav()
+        if total_nav < self.target_nav_growth:
+            self.redistribute_assets()
+            self.logger.info(f"Rebalanced swarm to align with target NAV growth: {self.target_nav_growth}")
+        else:
+            self.logger.info("Swarm NAV meets target; no rebalancing required.")
 
     async def run(self):
         """
-        Initializes and continuously runs the wallet swarm, rebalancing assets and executing strategies.
+        Runs the wallet swarm in a continuous loop, executing MEV strategies and rebalancing.
         """
         while True:
-            await self.balance_assets()
-            await self.execute_strategies()
-            await self.db.update_swarm_nav(self.calculate_total_nav())
-            await asyncio.sleep(1)  # Adjustable interval
-
-# Example usage
-if __name__ == "__main__":
-    db = DatabaseConnection()
-    wallet_addresses = ["0xWalletAddress1", "0xWalletAddress2"]  # Example addresses
-    wallet_swarm = WalletSwarm(db, wallet_addresses)
-    asyncio.run(wallet_swarm.run())
+            await self.execute_mev_strategy()
+            self.rebalance_swarm()
+            await asyncio.sleep(1)  # Adjustable time interval for re-execution
